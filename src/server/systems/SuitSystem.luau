@@ -79,6 +79,98 @@ local function applySuit(character: Model)
 	end
 end
 
+-- White EVA spacewalk suit worn in orbit: white shells over the body (covering any
+-- avatar/outfit), a helmet with a gold visor, and a life-support backpack. Fully
+-- removable (all parts are named EVA_*).
+function SuitSystem.applyEva(character: Model?)
+	if not character or character:FindFirstChild("EVA_Helmet") then
+		return
+	end
+	local EVA_WHITE = Color3.fromRGB(238, 240, 245)
+
+	local function shell(partName: string, mul: number)
+		local p = character:FindFirstChild(partName) :: BasePart?
+		if not p then
+			return
+		end
+		local s = Instance.new("Part")
+		s.Name = "EVA_Shell"
+		s.Size = p.Size * mul
+		s.Color = EVA_WHITE
+		s.Material = Enum.Material.SmoothPlastic
+		s.CanCollide = false
+		s.Massless = true
+		s.CFrame = p.CFrame
+		s.Parent = character
+		weld(s, p)
+	end
+
+	shell("UpperTorso", 1.18)
+	shell("LowerTorso", 1.16)
+	shell("LeftUpperArm", 1.35)
+	shell("RightUpperArm", 1.35)
+	shell("LeftLowerArm", 1.3)
+	shell("RightLowerArm", 1.3)
+	shell("LeftUpperLeg", 1.35)
+	shell("RightUpperLeg", 1.35)
+	shell("LeftLowerLeg", 1.3)
+	shell("RightLowerLeg", 1.3)
+
+	local head = character:FindFirstChild("Head") :: BasePart?
+	if head then
+		local helmet = Instance.new("Part")
+		helmet.Name = "EVA_Helmet"
+		helmet.Shape = Enum.PartType.Ball
+		helmet.Size = head.Size * 1.9
+		helmet.Color = EVA_WHITE
+		helmet.Material = Enum.Material.SmoothPlastic
+		helmet.CanCollide = false
+		helmet.Massless = true
+		helmet.CFrame = head.CFrame
+		helmet.Parent = character
+		weld(helmet, head)
+
+		local visor = Instance.new("Part")
+		visor.Name = "EVA_Shell"
+		visor.Shape = Enum.PartType.Ball
+		visor.Size = head.Size * 1.6
+		visor.Color = Color3.fromRGB(190, 150, 45)
+		visor.Material = Enum.Material.Glass
+		visor.Transparency = 0.1
+		visor.Reflectance = 0.5
+		visor.CanCollide = false
+		visor.Massless = true
+		visor.CFrame = head.CFrame * CFrame.new(0, 0.1, -head.Size.Z * 0.55)
+		visor.Parent = character
+		weld(visor, head)
+	end
+
+	local torso = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+	if torso and torso:IsA("BasePart") then
+		local pack = Instance.new("Part")
+		pack.Name = "EVA_Shell"
+		pack.Size = Vector3.new(2, 2.4, 1)
+		pack.Color = EVA_WHITE
+		pack.Material = Enum.Material.SmoothPlastic
+		pack.CanCollide = false
+		pack.Massless = true
+		pack.CFrame = torso.CFrame * CFrame.new(0, 0.2, 0.95)
+		pack.Parent = character
+		weld(pack, torso)
+	end
+end
+
+function SuitSystem.removeEva(character: Model?)
+	if not character then
+		return
+	end
+	for _, d in character:GetChildren() do
+		if d:IsA("BasePart") and (d.Name == "EVA_Shell" or d.Name == "EVA_Helmet") then
+			d:Destroy()
+		end
+	end
+end
+
 local function trackPlayer(player: Player)
 	player:SetAttribute("HasSuit", false)
 	player.CharacterAdded:Connect(function()

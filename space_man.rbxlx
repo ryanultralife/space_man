@@ -242,6 +242,7 @@ local Workspace = game:GetService("Workspace")
 local Config = require(ReplicatedStorage.Shared.Config)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local WorldBuilder = require(script.Parent.WorldBuilder)
+local SuitSystem = require(script.Parent.SuitSystem)
 
 local LaunchSystem = {}
 
@@ -393,6 +394,9 @@ local function endFlight()
 	complex.Crawler:PivotTo(complex.CrawlerVAB)
 	complex.Artemis:PivotTo(complex.ArtemisStart)
 	resetDescent()
+	for _, p in crew do
+		SuitSystem.removeEva(p.Character)
+	end
 	inFlight = false
 	canReturn = false
 	awaitingRescue = false
@@ -426,19 +430,17 @@ local function placeCrewSurface()
 end
 
 local function placeCrewOrbit()
+	-- Hop out of the capsule for a spacewalk: stand on the orbit deck in a white EVA suit.
 	for i, p in crew do
 		local hum = humanoidOf(p)
 		if not hum then
 			continue
 		end
-		if i == 1 then
-			complex.OrbitSeat:Sit(hum)
-		else
-			hum.Sit = false
-			if p.Character then
-				p.Character:PivotTo(complex.OrbitDeck.CFrame * CFrame.new((i - 2) * 4 - 2, 4, 0))
-			end
+		hum.Sit = false
+		if p.Character then
+			p.Character:PivotTo(complex.OrbitDeck.CFrame * CFrame.new((i - 1) * 4 - 2, 4, 0))
 		end
+		SuitSystem.applyEva(p.Character)
 	end
 end
 
@@ -500,12 +502,13 @@ local function runMission()
 			setTelemetry("TOUCHDOWN 🛬")
 			canReturn = true
 		else
+			Workspace.Gravity = Config.Gravity.Moon -- floaty microgravity for the spacewalk
 			placeCrewOrbit()
 			task.wait(0.1)
 			resetMissionVehicle()
 			fadeCrew("in", 0.8)
 			task.wait(0.8)
-			notifyCrew("🌍 Orbit achieved! Deploying satellite...")
+			notifyCrew("🌍 Orbit achieved! Spacewalk EVA suit on — float around, then head home.")
 
 			local idx = #deployedSats + 1
 			local name = string.format("SAT-%02d", idx)
@@ -607,6 +610,9 @@ local function onReturn(player: Player)
 		task.wait(0.8)
 		restoreLighting()
 		Workspace.Gravity = Config.Gravity.Earth
+		for _, p in crew do
+			SuitSystem.removeEva(p.Character)
+		end
 		complex.DescentRig:PivotTo(complex.DescentStart)
 		setParachute(true)
 
@@ -1111,6 +1117,98 @@ local function applySuit(character: Model)
 		pack.CFrame = torso.CFrame * CFrame.new(0, 0.2, 0.85)
 		pack.Parent = character
 		weld(pack, torso)
+	end
+end
+
+-- White EVA spacewalk suit worn in orbit: white shells over the body (covering any
+-- avatar/outfit), a helmet with a gold visor, and a life-support backpack. Fully
+-- removable (all parts are named EVA_*).
+function SuitSystem.applyEva(character: Model?)
+	if not character or character:FindFirstChild("EVA_Helmet") then
+		return
+	end
+	local EVA_WHITE = Color3.fromRGB(238, 240, 245)
+
+	local function shell(partName: string, mul: number)
+		local p = character:FindFirstChild(partName) :: BasePart?
+		if not p then
+			return
+		end
+		local s = Instance.new("Part")
+		s.Name = "EVA_Shell"
+		s.Size = p.Size * mul
+		s.Color = EVA_WHITE
+		s.Material = Enum.Material.SmoothPlastic
+		s.CanCollide = false
+		s.Massless = true
+		s.CFrame = p.CFrame
+		s.Parent = character
+		weld(s, p)
+	end
+
+	shell("UpperTorso", 1.18)
+	shell("LowerTorso", 1.16)
+	shell("LeftUpperArm", 1.35)
+	shell("RightUpperArm", 1.35)
+	shell("LeftLowerArm", 1.3)
+	shell("RightLowerArm", 1.3)
+	shell("LeftUpperLeg", 1.35)
+	shell("RightUpperLeg", 1.35)
+	shell("LeftLowerLeg", 1.3)
+	shell("RightLowerLeg", 1.3)
+
+	local head = character:FindFirstChild("Head") :: BasePart?
+	if head then
+		local helmet = Instance.new("Part")
+		helmet.Name = "EVA_Helmet"
+		helmet.Shape = Enum.PartType.Ball
+		helmet.Size = head.Size * 1.9
+		helmet.Color = EVA_WHITE
+		helmet.Material = Enum.Material.SmoothPlastic
+		helmet.CanCollide = false
+		helmet.Massless = true
+		helmet.CFrame = head.CFrame
+		helmet.Parent = character
+		weld(helmet, head)
+
+		local visor = Instance.new("Part")
+		visor.Name = "EVA_Shell"
+		visor.Shape = Enum.PartType.Ball
+		visor.Size = head.Size * 1.6
+		visor.Color = Color3.fromRGB(190, 150, 45)
+		visor.Material = Enum.Material.Glass
+		visor.Transparency = 0.1
+		visor.Reflectance = 0.5
+		visor.CanCollide = false
+		visor.Massless = true
+		visor.CFrame = head.CFrame * CFrame.new(0, 0.1, -head.Size.Z * 0.55)
+		visor.Parent = character
+		weld(visor, head)
+	end
+
+	local torso = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+	if torso and torso:IsA("BasePart") then
+		local pack = Instance.new("Part")
+		pack.Name = "EVA_Shell"
+		pack.Size = Vector3.new(2, 2.4, 1)
+		pack.Color = EVA_WHITE
+		pack.Material = Enum.Material.SmoothPlastic
+		pack.CanCollide = false
+		pack.Massless = true
+		pack.CFrame = torso.CFrame * CFrame.new(0, 0.2, 0.95)
+		pack.Parent = character
+		weld(pack, torso)
+	end
+end
+
+function SuitSystem.removeEva(character: Model?)
+	if not character then
+		return
+	end
+	for _, d in character:GetChildren() do
+		if d:IsA("BasePart") and (d.Name == "EVA_Shell" or d.Name == "EVA_Helmet") then
+			d:Destroy()
+		end
 	end
 end
 

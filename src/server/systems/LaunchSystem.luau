@@ -17,6 +17,7 @@ local Workspace = game:GetService("Workspace")
 local Config = require(ReplicatedStorage.Shared.Config)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local WorldBuilder = require(script.Parent.WorldBuilder)
+local SuitSystem = require(script.Parent.SuitSystem)
 
 local LaunchSystem = {}
 
@@ -168,6 +169,9 @@ local function endFlight()
 	complex.Crawler:PivotTo(complex.CrawlerVAB)
 	complex.Artemis:PivotTo(complex.ArtemisStart)
 	resetDescent()
+	for _, p in crew do
+		SuitSystem.removeEva(p.Character)
+	end
 	inFlight = false
 	canReturn = false
 	awaitingRescue = false
@@ -201,19 +205,17 @@ local function placeCrewSurface()
 end
 
 local function placeCrewOrbit()
+	-- Hop out of the capsule for a spacewalk: stand on the orbit deck in a white EVA suit.
 	for i, p in crew do
 		local hum = humanoidOf(p)
 		if not hum then
 			continue
 		end
-		if i == 1 then
-			complex.OrbitSeat:Sit(hum)
-		else
-			hum.Sit = false
-			if p.Character then
-				p.Character:PivotTo(complex.OrbitDeck.CFrame * CFrame.new((i - 2) * 4 - 2, 4, 0))
-			end
+		hum.Sit = false
+		if p.Character then
+			p.Character:PivotTo(complex.OrbitDeck.CFrame * CFrame.new((i - 1) * 4 - 2, 4, 0))
 		end
+		SuitSystem.applyEva(p.Character)
 	end
 end
 
@@ -275,12 +277,13 @@ local function runMission()
 			setTelemetry("TOUCHDOWN 🛬")
 			canReturn = true
 		else
+			Workspace.Gravity = Config.Gravity.Moon -- floaty microgravity for the spacewalk
 			placeCrewOrbit()
 			task.wait(0.1)
 			resetMissionVehicle()
 			fadeCrew("in", 0.8)
 			task.wait(0.8)
-			notifyCrew("🌍 Orbit achieved! Deploying satellite...")
+			notifyCrew("🌍 Orbit achieved! Spacewalk EVA suit on — float around, then head home.")
 
 			local idx = #deployedSats + 1
 			local name = string.format("SAT-%02d", idx)
@@ -382,6 +385,9 @@ local function onReturn(player: Player)
 		task.wait(0.8)
 		restoreLighting()
 		Workspace.Gravity = Config.Gravity.Earth
+		for _, p in crew do
+			SuitSystem.removeEva(p.Character)
+		end
 		complex.DescentRig:PivotTo(complex.DescentStart)
 		setParachute(true)
 
