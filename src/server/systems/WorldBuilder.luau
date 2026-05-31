@@ -58,6 +58,11 @@ export type Complex = {
 	TelemetryLabel: TextLabel,
 	ElevatorPrompt: ProximityPrompt,
 	CrewArmTop: CFrame,
+	Astrovan: Model,
+	AstrovanSeat: Seat,
+	AstrovanPrompt: ProximityPrompt,
+	AstrovanStart: CFrame,
+	AstrovanPad: CFrame,
 }
 
 local CONCRETE = Color3.fromRGB(150, 150, 158)
@@ -951,6 +956,41 @@ function WorldBuilder.build(): Complex
 	suitPrompt.MaxActivationDistance = Config.Suit.PromptDistance
 	suitPrompt.Parent = suitConsole
 
+	-- Astrovan: drives the suited crew from the suit-up room out to the pad (real KSC step).
+	local vanPos = Vector3.new(38, 3, 64)
+	local astrovan = Instance.new("Model")
+	astrovan.Name = "Astrovan"
+	local vanHull = part(astrovan, { Name = "Hull", Size = Vector3.new(7, 4, 13), Position = vanPos, Color = Color3.fromRGB(222, 224, 230), Material = Enum.Material.SmoothPlastic })
+	part(astrovan, { Name = "Cab", Size = Vector3.new(6.6, 2.6, 4), Position = vanPos + Vector3.new(0, 0.7, 6), Color = Color3.fromRGB(222, 224, 230), Material = Enum.Material.SmoothPlastic })
+	part(astrovan, { Name = "Glass", Size = Vector3.new(6.4, 1.8, 0.3), Position = vanPos + Vector3.new(0, 1.3, 8), Color = Color3.fromRGB(40, 60, 90), Material = Enum.Material.Glass })
+	part(astrovan, { Name = "SideGlass", Size = Vector3.new(7.1, 1.6, 9), Position = vanPos + Vector3.new(0, 1.4, -1.5), Color = Color3.fromRGB(45, 65, 95), Material = Enum.Material.Glass, Transparency = 0.2 })
+	part(astrovan, { Name = "Stripe", Size = Vector3.new(7.1, 0.7, 13), Position = vanPos + Vector3.new(0, -0.6, 0), Color = ACCENT, Material = Enum.Material.SmoothPlastic })
+	for _, off in { Vector3.new(3.6, -2, 4), Vector3.new(-3.6, -2, 4), Vector3.new(3.6, -2, -4), Vector3.new(-3.6, -2, -4) } do
+		part(astrovan, { Name = "Wheel", Shape = Enum.PartType.Cylinder, Size = Vector3.new(1.4, 3, 3), Position = vanPos + off, Color = Color3.fromRGB(35, 37, 43) })
+	end
+	local vanSeat = Instance.new("Seat")
+	vanSeat.Name = "AstrovanSeat"
+	vanSeat.Anchored = true
+	vanSeat.CanCollide = false
+	vanSeat.Transparency = 1
+	vanSeat.Size = Vector3.new(3, 1, 3)
+	vanSeat.CFrame = CFrame.new(vanPos + Vector3.new(0, 0.5, -2))
+	vanSeat.Parent = astrovan
+	local vanRoot = part(astrovan, { Name = "Root", Size = Vector3.new(1, 1, 1), Transparency = 1, CanCollide = false, CFrame = CFrame.new(vanPos) })
+	astrovan.PrimaryPart = vanRoot
+	local astrovanPrompt = Instance.new("ProximityPrompt")
+	astrovanPrompt.Name = "AstrovanPrompt"
+	astrovanPrompt.ActionText = "Ride Astrovan to Pad"
+	astrovanPrompt.ObjectText = "Astrovan"
+	astrovanPrompt.HoldDuration = 0.5
+	astrovanPrompt.RequiresLineOfSight = false
+	astrovanPrompt.MaxActivationDistance = 14
+	astrovanPrompt.Parent = vanHull
+	nameTag(vanHull, "🚐 ASTROVAN", 4)
+	astrovan.Parent = model
+	local astrovanStart = astrovan:GetPivot()
+	local astrovanPad = CFrame.new(-32, 3, -72)
+
 	-- Vehicle Assembly Building — towering, like the real VAB. Door faces the pad (-Z).
 	local vabCenter = Vector3.new(0, 80, 38)
 	buildHall(model, "VAB", vabCenter, Vector3.new(40, 160, 34), WHITE, Enum.Material.Concrete, 26, 150, -1)
@@ -980,7 +1020,7 @@ function WorldBuilder.build(): Complex
 	local mcCenter = Vector3.new(-56, 7, 20)
 	buildHall(model, "MC", mcCenter, Vector3.new(30, 14, 22), Color3.fromRGB(208, 210, 216), Enum.Material.Concrete, 6, 9, 1)
 	local mc = part(model, { Name = "MissionControl", Size = Vector3.new(1, 1, 1), Position = mcCenter + Vector3.new(0, 8, 0), Transparency = 1, CanCollide = false })
-	nameTag(mc, "MISSION CONTROL", 2)
+	nameTag(mc, "LAUNCH CONTROL CENTER", 2)
 
 	part(model, {
 		Name = "Crawlerway",
@@ -1027,6 +1067,14 @@ function WorldBuilder.build(): Complex
 	part(model, { Name = "CrewArm", Size = Vector3.new(16, 0.8, 4), Position = Vector3.new(-8, capsuleY, towerZ), Color = Color3.fromRGB(150, 152, 160), Material = Enum.Material.Metal })
 	part(model, { Name = "ArmRail", Size = Vector3.new(16, 1.6, 0.3), Position = Vector3.new(-8, capsuleY + 1.2, towerZ - 1.9), Color = ACCENT, Material = Enum.Material.Metal })
 	part(model, { Name = "ArmRail", Size = Vector3.new(16, 1.6, 0.3), Position = Vector3.new(-8, capsuleY + 1.2, towerZ + 1.9), Color = ACCENT, Material = Enum.Material.Metal })
+
+	-- White Room at the arm's end (open toward the capsule) — crew board through here.
+	local wr = Vector3.new(-11, capsuleY, towerZ)
+	part(model, { Name = "WhiteRoomFloor", Size = Vector3.new(7, 0.5, 7), Position = wr + Vector3.new(0, -0.4, 0), Color = WHITE, Material = Enum.Material.SmoothPlastic })
+	part(model, { Name = "WhiteRoomRoof", Size = Vector3.new(7, 0.5, 7), Position = wr + Vector3.new(0, 4.5, 0), Color = WHITE, Material = Enum.Material.SmoothPlastic })
+	part(model, { Name = "WhiteRoomWall", Size = Vector3.new(0.5, 5, 7), Position = wr + Vector3.new(-3.5, 2.2, 0), Color = WHITE, Material = Enum.Material.SmoothPlastic })
+	part(model, { Name = "WhiteRoomWall", Size = Vector3.new(7, 5, 0.5), Position = wr + Vector3.new(0, 2.2, -3.5), Color = WHITE, Material = Enum.Material.SmoothPlastic })
+	part(model, { Name = "WhiteRoomWall", Size = Vector3.new(7, 5, 0.5), Position = wr + Vector3.new(0, 2.2, 3.5), Color = WHITE, Material = Enum.Material.SmoothPlastic })
 
 	-- Crew elevator at the tower base — ride it up to the access arm.
 	local elevatorCar = part(model, { Name = "ElevatorCar", Size = Vector3.new(5, 6, 5), Position = Vector3.new(towerX, 3, towerZ), Color = Color3.fromRGB(90, 94, 104), Material = Enum.Material.Metal, Transparency = 0.15 })
@@ -1322,6 +1370,11 @@ function WorldBuilder.build(): Complex
 		TelemetryLabel = telemetryLabel,
 		ElevatorPrompt = elevatorPrompt,
 		CrewArmTop = crewArmTop,
+		Astrovan = astrovan,
+		AstrovanSeat = vanSeat,
+		AstrovanPrompt = astrovanPrompt,
+		AstrovanStart = astrovanStart,
+		AstrovanPad = astrovanPad,
 	}
 end
 

@@ -13,6 +13,56 @@ local notify = Remotes.event("Notify")
 local screen = Remotes.event("Screen")
 
 function RocketBoarding.start(complex: any, launchSystem: any)
+	-- Astrovan: ride the suited crew from the suit-up room out to the pad (real KSC step).
+	local astrovanBusy = false
+	complex.AstrovanPrompt.Triggered:Connect(function(player: Player)
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if not humanoid then
+			return
+		end
+		if not player:GetAttribute("HasSuit") then
+			notify:FireClient(player, "🚫 Suit up in the Suit-Up Room first.")
+			return
+		end
+		if astrovanBusy then
+			notify:FireClient(player, "🚐 The Astrovan is already running — catch the next ride.")
+			return
+		end
+		astrovanBusy = true
+		complex.AstrovanSeat:Sit(humanoid)
+		notify:FireClient(player, "🚐 Riding the Astrovan out to the pad...")
+		task.spawn(function()
+			local from, to = complex.AstrovanStart, complex.AstrovanPad
+			local dur = 8
+			local t = 0
+			while t < dur do
+				local dt = task.wait()
+				t += dt
+				complex.Astrovan:PivotTo(from:Lerp(to, math.clamp(t / dur, 0, 1)))
+			end
+			complex.Astrovan:PivotTo(to)
+			local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+			if hum then
+				hum.Sit = false
+			end
+			task.wait(0.15)
+			if player.Character then
+				player.Character:PivotTo(CFrame.new(-26, 3, -72))
+			end
+			notify:FireClient(player, "🛗 At the pad — take the crew elevator up the tower.")
+			task.wait(1)
+			local t2 = 0
+			while t2 < 6 do
+				local dt = task.wait()
+				t2 += dt
+				complex.Astrovan:PivotTo(to:Lerp(from, math.clamp(t2 / 6, 0, 1)))
+			end
+			complex.Astrovan:PivotTo(from)
+			astrovanBusy = false
+		end)
+	end)
+
 	-- Crew elevator: ride up to the access arm.
 	complex.ElevatorPrompt.Triggered:Connect(function(player: Player)
 		local character = player.Character
