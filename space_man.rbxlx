@@ -2317,11 +2317,33 @@ function WorldBuilder.build(): Complex
 		Material = Enum.Material.Metal,
 	})
 
+	-- Inside the VAB: a rocket under construction on the stand, with scaffolding + crane.
+	part(model, { Name = "BuildStand", Size = Vector3.new(16, 4, 16), Position = Vector3.new(0, 2, 38), Color = DARK, Material = Enum.Material.DiamondPlate })
+	vcyl(model, "BuildStageA", 0, 38, 24, 40, 9, WHITE)
+	vcyl(model, "BuildStageB", 0, 38, 50, 14, 7.5, Color3.fromRGB(205, 205, 214))
+	for _, c in { Vector3.new(-9, 0, -9), Vector3.new(9, 0, -9), Vector3.new(-9, 0, 9), Vector3.new(9, 0, 9) } do
+		part(model, { Name = "Scaffold", Size = Vector3.new(1, 116, 1), Position = Vector3.new(c.X, 58, 38 + c.Z), Color = Color3.fromRGB(180, 150, 60), Material = Enum.Material.Metal })
+	end
+	for _, py in { 36, 66, 96 } do
+		part(model, { Name = "WorkPlatform", Size = Vector3.new(22, 0.5, 22), Position = Vector3.new(0, py, 38), Color = Color3.fromRGB(180, 150, 60), Material = Enum.Material.Metal, Transparency = 0.45 })
+	end
+	part(model, { Name = "VABCrane", Size = Vector3.new(34, 1.5, 2.5), Position = Vector3.new(0, 132, 38), Color = DARK, Material = Enum.Material.Metal })
+
 	-- Mission Control (enterable). Walk in the north door; screens are on the east wall.
 	local mcCenter = Vector3.new(-56, 7, 20)
 	buildHall(model, "MC", mcCenter, Vector3.new(30, 14, 22), Color3.fromRGB(208, 210, 216), Enum.Material.Concrete, 6, 9, 1)
 	local mc = part(model, { Name = "MissionControl", Size = Vector3.new(1, 1, 1), Position = mcCenter + Vector3.new(0, 8, 0), Transparency = 1, CanCollide = false })
 	nameTag(mc, "LAUNCH CONTROL CENTER", 2)
+
+	-- Inside the LCC: a big front screen wall + two rows of control consoles facing it.
+	part(model, { Name = "MCScreen", Size = Vector3.new(22, 8, 0.5), Position = Vector3.new(-56, 6, 10.4), Color = Color3.fromRGB(12, 20, 34), Material = Enum.Material.SmoothPlastic })
+	part(model, { Name = "MCScreenGlow", Size = Vector3.new(20, 6, 0.2), Position = Vector3.new(-56, 6, 10.1), Color = Color3.fromRGB(40, 120, 170), Material = Enum.Material.Neon, Transparency = 0.45 })
+	for row = 0, 1 do
+		for _, cx in { -8, 0, 8 } do
+			part(model, { Name = "MCConsole", Size = Vector3.new(6, 2, 2.5), Position = Vector3.new(-56 + cx, 1.5, 18 + row * 5), Color = Color3.fromRGB(40, 44, 54), Material = Enum.Material.Metal })
+			part(model, { Name = "MCConsoleScreen", Size = Vector3.new(5, 1.4, 0.3), Position = Vector3.new(-56 + cx, 2.9, 16.9 + row * 5), Color = Color3.fromRGB(40, 130, 95), Material = Enum.Material.Neon })
+		end
+	end
 
 	part(model, {
 		Name = "Crawlerway",
@@ -2455,7 +2477,7 @@ function WorldBuilder.build(): Complex
 	-- the splashdown happens just offshore. Sandy beach rim around the island edge:
 	part(model, {
 		Name = "Beach",
-		Size = Vector3.new(440, 1, 400),
+		Size = Vector3.new(780, 1, 720),
 		Position = Vector3.new(20, -0.6, -10),
 		Color = Color3.fromRGB(216, 200, 150),
 		Material = Enum.Material.Sand,
@@ -2911,9 +2933,9 @@ return Notifier
           <Z>-10</Z>
         </Vector3>
         <Vector3 name="size">
-          <X>360</X>
+          <X>700</X>
           <Y>20</Y>
-          <Z>320</Z>
+          <Z>640</Z>
         </Vector3>
       </Properties>
     </Item>
