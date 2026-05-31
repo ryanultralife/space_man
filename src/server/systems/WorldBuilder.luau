@@ -636,25 +636,8 @@ function WorldBuilder.build(): Complex
 	model.Name = "SpaceMan"
 	model.Parent = Workspace
 
-	part(model, {
-		Name = "Ground",
-		Size = Vector3.new(280, 1, 320),
-		Position = Vector3.new(0, -0.5, 0),
-		Color = Color3.fromRGB(78, 110, 70),
-		Material = Enum.Material.Grass,
-	})
-
-	local spawnPad = Instance.new("SpawnLocation")
-	spawnPad.Name = "Spawn"
-	spawnPad.Anchored = true
-	spawnPad.Size = Vector3.new(10, 1, 10)
-	spawnPad.Position = Vector3.new(0, 0.5, 74)
-	spawnPad.Color = CONCRETE
-	spawnPad.Material = Enum.Material.Concrete
-	spawnPad.Neutral = true
-	spawnPad.Duration = 0
-	spawnPad.Parent = model
-
+	-- Ground + spawn are static in the place (see default.project.json) so they show
+	-- in Studio's Edit view too; the rest of the complex is generated here on Play.
 	local suitStation = part(model, {
 		Name = "SuitStation",
 		Size = Vector3.new(8, 4, 8),

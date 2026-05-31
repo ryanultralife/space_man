@@ -72,7 +72,7 @@ Config.Destinations = { "EarthOrbit", "Moon", "Mars" }
 
 Config.Servers = {
 	PublicMax = 1, -- public/normal servers are solo
-	PrivateMax = 5, -- free private servers hold up to 5 (the owner's chosen friends)
+	PrivateMax = 4, -- free private servers hold up to 4 (the Artemis crew size)
 }
 
 return Config

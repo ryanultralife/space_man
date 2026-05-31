@@ -2,7 +2,7 @@
   <Item class="Players" referent="0">
     <Properties>
       <string name="Name">Players</string>
-      <int name="MaxPlayersInternal">5</int>
+      <int name="MaxPlayersInternal">4</int>
     </Properties>
   </Item>
   <Item class="ReplicatedStorage" referent="1">
@@ -90,7 +90,7 @@ Config.Destinations = { "EarthOrbit", "Moon", "Mars" }
 
 Config.Servers = {
 	PublicMax = 1, -- public/normal servers are solo
-	PrivateMax = 5, -- free private servers hold up to 5 (the owner's chosen friends)
+	PrivateMax = 4, -- free private servers hold up to 4 (the Artemis crew size)
 }
 
 return Config
@@ -1439,25 +1439,8 @@ function WorldBuilder.build(): Complex
 	model.Name = "SpaceMan"
 	model.Parent = Workspace
 
-	part(model, {
-		Name = "Ground",
-		Size = Vector3.new(280, 1, 320),
-		Position = Vector3.new(0, -0.5, 0),
-		Color = Color3.fromRGB(78, 110, 70),
-		Material = Enum.Material.Grass,
-	})
-
-	local spawnPad = Instance.new("SpawnLocation")
-	spawnPad.Name = "Spawn"
-	spawnPad.Anchored = true
-	spawnPad.Size = Vector3.new(10, 1, 10)
-	spawnPad.Position = Vector3.new(0, 0.5, 74)
-	spawnPad.Color = CONCRETE
-	spawnPad.Material = Enum.Material.Concrete
-	spawnPad.Neutral = true
-	spawnPad.Duration = 0
-	spawnPad.Parent = model
-
+	-- Ground + spawn are static in the place (see default.project.json) so they show
+	-- in Studio's Edit view too; the rest of the complex is generated here on Play.
 	local suitStation = part(model, {
 		Name = "SuitStation",
 		Size = Vector3.new(8, 4, 8),
@@ -1882,6 +1865,48 @@ return Notifier
           </Item>
         </Item>
       </Item>
+    </Item>
+  </Item>
+  <Item class="Workspace" referent="18">
+    <Properties>
+      <string name="Name">Workspace</string>
+      <float name="Gravity">196.2</float>
+      <bool name="NeedsPivotMigration">false</bool>
+    </Properties>
+    <Item class="Part" referent="19">
+      <Properties>
+        <string name="Name">Baseplate</string>
+        <bool name="Anchored">true</bool>
+        <Color3uint8 name="Color3uint8">4548162</Color3uint8>
+        <Vector3 name="Position">
+          <X>0</X>
+          <Y>-10</Y>
+          <Z>0</Z>
+        </Vector3>
+        <Vector3 name="size">
+          <X>600</X>
+          <Y>20</Y>
+          <Z>600</Z>
+        </Vector3>
+      </Properties>
+    </Item>
+    <Item class="SpawnLocation" referent="20">
+      <Properties>
+        <string name="Name">LaunchSpawn</string>
+        <bool name="Anchored">true</bool>
+        <int name="Duration">0</int>
+        <bool name="Neutral">true</bool>
+        <Vector3 name="Position">
+          <X>0</X>
+          <Y>0.5</Y>
+          <Z>74</Z>
+        </Vector3>
+        <Vector3 name="size">
+          <X>10</X>
+          <Y>1</Y>
+          <Z>10</Z>
+        </Vector3>
+      </Properties>
     </Item>
   </Item>
 </roblox>
