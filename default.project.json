@@ -2,6 +2,11 @@
   "name": "space_man",
   "tree": {
     "$className": "DataModel",
+    "Players": {
+      "$properties": {
+        "MaxPlayers": 5
+      }
+    },
     "ReplicatedStorage": {
       "Shared": {
         "$path": "src/shared"

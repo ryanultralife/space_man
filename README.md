@@ -37,6 +37,17 @@ syncs live into Roblox Studio.
   deployed in orbit.
 - On-screen toast notifications, screen fades, and a small action button (client HUD).
 
+## Servers
+
+- **Normal (public) server: solo** — 1 player. (Fits the game — one astronaut flies at a time.)
+- **Private server: free, up to 5 players** — the owner invites their chosen friends.
+
+The caps are enforced in code (`ServerCapacity`): public servers drop to **1**, player-owned
+private servers allow **5**. The place ceiling is 5 (`default.project.json`). **Making private
+servers free is a one-time settings toggle** (you can't do it in code): after publishing the
+game, in the Creator Dashboard go to **Monetization → Private Servers → On** and set the price
+to **Free**. In Studio playtests `PrivateServerOwnerId` is 0, so it behaves like a public (solo) server.
+
 ## Roadmap
 
 1. ✅ Launch complex + suit-up gate + boarding gate

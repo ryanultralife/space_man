@@ -7,10 +7,14 @@ local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 
+local ServerCapacity = require(script.systems.ServerCapacity)
 local WorldBuilder = require(script.systems.WorldBuilder)
 local SuitSystem = require(script.systems.SuitSystem)
 local LaunchSystem = require(script.systems.LaunchSystem)
 local RocketBoarding = require(script.systems.RocketBoarding)
+
+-- Public servers are solo; player-owned private servers hold up to 5.
+ServerCapacity.apply()
 
 Workspace.Gravity = Config.Gravity[Config.CurrentWorld] or 196.2
 

@@ -1,13 +1,19 @@
 <roblox version="4">
-  <Item class="ReplicatedStorage" referent="0">
+  <Item class="Players" referent="0">
+    <Properties>
+      <string name="Name">Players</string>
+      <int name="MaxPlayersInternal">5</int>
+    </Properties>
+  </Item>
+  <Item class="ReplicatedStorage" referent="1">
     <Properties>
       <string name="Name">ReplicatedStorage</string>
     </Properties>
-    <Item class="Folder" referent="1">
+    <Item class="Folder" referent="2">
       <Properties>
         <string name="Name">Shared</string>
       </Properties>
-      <Item class="ModuleScript" referent="2">
+      <Item class="ModuleScript" referent="3">
         <Properties>
           <string name="Name">Config</string>
           <string name="Source"><![CDATA[--!strict
@@ -82,11 +88,16 @@ Config.Surface = {
 
 Config.Destinations = { "EarthOrbit", "Moon", "Mars" }
 
+Config.Servers = {
+	PublicMax = 1, -- public/normal servers are solo
+	PrivateMax = 5, -- free private servers hold up to 5 (the owner's chosen friends)
+}
+
 return Config
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="3">
+      <Item class="ModuleScript" referent="4">
         <Properties>
           <string name="Name">Remotes</string>
           <string name="Source"><![CDATA[--!strict
@@ -133,11 +144,11 @@ return Remotes
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="4">
+  <Item class="ServerScriptService" referent="5">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Script" referent="5">
+    <Item class="Script" referent="6">
       <Properties>
         <string name="Name">Server</string>
         <token name="RunContext">0</token>
@@ -150,10 +161,14 @@ local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 
+local ServerCapacity = require(script.systems.ServerCapacity)
 local WorldBuilder = require(script.systems.WorldBuilder)
 local SuitSystem = require(script.systems.SuitSystem)
 local LaunchSystem = require(script.systems.LaunchSystem)
 local RocketBoarding = require(script.systems.RocketBoarding)
+
+-- Public servers are solo; player-owned private servers hold up to 5.
+ServerCapacity.apply()
 
 Workspace.Gravity = Config.Gravity[Config.CurrentWorld] or 196.2
 
@@ -165,11 +180,11 @@ RocketBoarding.start(complex, LaunchSystem)
 print(`[space_man] server ready — world: {Config.CurrentWorld}, gravity: {Workspace.Gravity}`)
 ]]></string>
       </Properties>
-      <Item class="Folder" referent="6">
+      <Item class="Folder" referent="7">
         <Properties>
           <string name="Name">systems</string>
         </Properties>
-        <Item class="ModuleScript" referent="7">
+        <Item class="ModuleScript" referent="8">
           <Properties>
             <string name="Name">LaunchSystem</string>
             <string name="Source"><![CDATA[--!strict
@@ -615,7 +630,7 @@ return LaunchSystem
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="8">
+        <Item class="ModuleScript" referent="9">
           <Properties>
             <string name="Name">RocketBoarding</string>
             <string name="Source"><![CDATA[--!strict
@@ -661,7 +676,39 @@ return RocketBoarding
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="9">
+        <Item class="ModuleScript" referent="10">
+          <Properties>
+            <string name="Name">ServerCapacity</string>
+            <string name="Source"><![CDATA[--!strict
+-- Sets how many players a server holds, based on whether it's a private server.
+--   * Public / normal server      → solo (Config.Servers.PublicMax, default 1)
+--   * Player-owned private server  → Config.Servers.PrivateMax (default 5)
+--
+-- `game.PrivateServerOwnerId` is the UserId of the private server's owner, or 0 for a
+-- public server (also 0 in Studio playtests, so testing behaves like a public server).
+--
+-- NOTE: the place's MaxPlayers (set to 5 in default.project.json) is the ceiling the
+-- matchmaker uses; runtime can lower it but not raise it past that. And making private
+-- servers FREE is a toggle in the experience settings — see the README.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+
+local ServerCapacity = {}
+
+function ServerCapacity.apply()
+	local isPrivate = game.PrivateServerOwnerId ~= 0
+	Players.MaxPlayers = if isPrivate then Config.Servers.PrivateMax else Config.Servers.PublicMax
+	print(`[space_man] {if isPrivate then "PRIVATE server" else "PUBLIC server"} — max players: {Players.MaxPlayers}`)
+end
+
+return ServerCapacity
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="11">
           <Properties>
             <string name="Name">SuitSystem</string>
             <string name="Source"><![CDATA[--!strict
@@ -751,7 +798,7 @@ return SuitSystem
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="10">
+        <Item class="ModuleScript" referent="12">
           <Properties>
             <string name="Name">WorldBuilder</string>
             <string name="Source"><![CDATA[--!strict
@@ -1629,15 +1676,15 @@ return WorldBuilder
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="11">
+  <Item class="StarterPlayer" referent="13">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="12">
+    <Item class="StarterPlayerScripts" referent="14">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="13">
+      <Item class="LocalScript" referent="15">
         <Properties>
           <string name="Name">Client</string>
           <string name="Source"><![CDATA[--!strict
@@ -1696,11 +1743,11 @@ Notifier.RescueClicked:Connect(function()
 end)
 ]]></string>
         </Properties>
-        <Item class="Folder" referent="14">
+        <Item class="Folder" referent="16">
           <Properties>
             <string name="Name">ui</string>
           </Properties>
-          <Item class="ModuleScript" referent="15">
+          <Item class="ModuleScript" referent="17">
             <Properties>
               <string name="Name">Notifier</string>
               <string name="Source"><![CDATA[--!strict
