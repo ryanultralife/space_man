@@ -1086,19 +1086,27 @@ function WorldBuilder.build(): Complex
 	payloadPrompt.MaxActivationDistance = 10
 	payloadPrompt.Parent = payloadConsole
 
-	-- Ocean east of the Cape. Prefer real terrain water; fall back to a water-coloured
-	-- part if the place has no Terrain object (so this can never crash the build).
+	-- The complex sits on an ISLAND (like KSC on Merritt Island); sea surrounds it and
+	-- the splashdown happens just offshore. Sandy beach rim around the island edge:
+	part(model, {
+		Name = "Beach",
+		Size = Vector3.new(440, 1, 400),
+		Position = Vector3.new(20, -0.6, -10),
+		Color = Color3.fromRGB(216, 200, 150),
+		Material = Enum.Material.Sand,
+	})
+	-- Surrounding sea — prefer real terrain water, else a translucent part (never crashes).
 	local terrain = Workspace:FindFirstChildOfClass("Terrain")
 	if terrain then
-		terrain:FillBlock(CFrame.new(Config.Ocean.Center), Config.Ocean.Size, Enum.Material.Water)
+		terrain:FillBlock(CFrame.new(Vector3.new(20, -10.5, -10)), Vector3.new(4000, 20, 4000), Enum.Material.Water)
 	else
 		part(model, {
-			Name = "Ocean",
-			Size = Vector3.new(Config.Ocean.Size.X, 2, Config.Ocean.Size.Z),
-			Position = Config.Ocean.Center + Vector3.new(0, 19, 0),
-			Color = Color3.fromRGB(40, 96, 150),
+			Name = "Sea",
+			Size = Vector3.new(4000, 8, 4000),
+			Position = Vector3.new(20, -4.5, -10),
+			Color = Color3.fromRGB(28, 92, 138),
 			Material = Enum.Material.Glass,
-			Transparency = 0.25,
+			Transparency = 0.3,
 		})
 	end
 
