@@ -30,12 +30,13 @@ Config.Rocket = {
 	RolloutSeconds = 30,
 	RolloutReturnSeconds = 8, -- crawler retreat back to the VAB afterwards
 	PromptDistance = 11,
+	Scale = 2.6, -- rockets are scaled up this much so they tower over a human-sized player
 }
 
 Config.Launch = {
 	CountdownFrom = 5,
-	AscentSeconds = 7,
-	AscentHeight = 260,
+	AscentSeconds = 9,
+	AscentHeight = 600,
 	FadeSeconds = 0.7,
 }
 

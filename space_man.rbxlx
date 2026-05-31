@@ -48,12 +48,13 @@ Config.Rocket = {
 	RolloutSeconds = 30,
 	RolloutReturnSeconds = 8, -- crawler retreat back to the VAB afterwards
 	PromptDistance = 11,
+	Scale = 2.6, -- rockets are scaled up this much so they tower over a human-sized player
 }
 
 Config.Launch = {
 	CountdownFrom = 5,
-	AscentSeconds = 7,
-	AscentHeight = 260,
+	AscentSeconds = 9,
+	AscentHeight = 600,
 	FadeSeconds = 0.7,
 }
 
@@ -1524,6 +1525,7 @@ local function buildRocket(parent: Instance, base: Vector3): (Model, Seat, Proxi
 	})
 	rocket.PrimaryPart = root
 	rocket.Parent = parent
+	rocket:ScaleTo(Config.Rocket.Scale) -- scaled up so it towers over a human-sized player
 	return rocket, seat, boardPrompt, engineFX
 end
 
@@ -1539,6 +1541,7 @@ function WorldBuilder.applyRocketBuild(rocket: Model)
 		end
 	end
 
+	local s = Config.Rocket.Scale or 1
 	local boosters = rocket:GetAttribute("Boosters") or 0
 	local angles = {}
 	if boosters == 2 then
@@ -1551,18 +1554,18 @@ function WorldBuilder.applyRocketBuild(rocket: Model)
 		part(rocket, {
 			Name = "BuiltBooster",
 			Shape = Enum.PartType.Cylinder,
-			Size = Vector3.new(24, 4, 4),
+			Size = Vector3.new(24 * s, 4 * s, 4 * s),
 			Color = WHITE,
 			Material = Enum.Material.SmoothPlastic,
-			CFrame = root.CFrame * CFrame.new(math.cos(a) * 5.4, 14, math.sin(a) * 5.4) * CFrame.Angles(0, 0, math.rad(90)),
+			CFrame = root.CFrame * CFrame.new(math.cos(a) * 5.4 * s, 14 * s, math.sin(a) * 5.4 * s) * CFrame.Angles(0, 0, math.rad(90)),
 		})
 		part(rocket, {
 			Name = "BuiltBooster",
 			Shape = Enum.PartType.Ball,
-			Size = Vector3.new(4, 4, 4),
+			Size = Vector3.new(4 * s, 4 * s, 4 * s),
 			Color = Color3.fromRGB(210, 80, 60),
 			Material = Enum.Material.SmoothPlastic,
-			CFrame = root.CFrame * CFrame.new(math.cos(a) * 5.4, 26.5, math.sin(a) * 5.4),
+			CFrame = root.CFrame * CFrame.new(math.cos(a) * 5.4 * s, 26.5 * s, math.sin(a) * 5.4 * s),
 		})
 	end
 
@@ -2068,8 +2071,16 @@ local function buildArtemis(parent: Instance, base: Vector3): (Model, { Seat }, 
 	signLabel.Parent = signGui
 	signGui.Parent = capBase
 
-	artemis.PrimaryPart = artemis:FindFirstChild("Core") :: BasePart
+	local artemisRoot = part(artemis, {
+		Name = "Root",
+		Size = Vector3.new(2, 2, 2),
+		Transparency = 1,
+		CanCollide = false,
+		CFrame = CFrame.new(bx, base.Y, bz),
+	})
+	artemis.PrimaryPart = artemisRoot
 	artemis.Parent = parent
+	artemis:ScaleTo(Config.Rocket.Scale)
 	return artemis, seats, boardPrompt, launchPrompt, engineFX, signLabel
 end
 
@@ -2191,27 +2202,27 @@ function WorldBuilder.build(): Complex
 	suitPrompt.MaxActivationDistance = Config.Suit.PromptDistance
 	suitPrompt.Parent = suitConsole
 
-	-- Vehicle Assembly Building (enterable). Big high-bay door faces the pad (-Z).
-	local vabCenter = Vector3.new(0, 28, 40)
-	buildHall(model, "VAB", vabCenter, Vector3.new(34, 56, 34), WHITE, Enum.Material.Concrete, 16, 34, -1)
-	local vabCore = part(model, { Name = "VehicleAssemblyBuilding", Size = Vector3.new(1, 1, 1), Position = vabCenter + Vector3.new(0, 30, 0), Transparency = 1, CanCollide = false })
-	nameTag(vabCore, "VEHICLE ASSEMBLY", 4)
-	-- Ground console by the VAB's pad-facing door for the rollout prompt.
-	local vab = part(model, { Name = "VABConsole", Size = Vector3.new(4, 3, 1.5), Position = Vector3.new(0, 1.5, 21), Color = DARK, Material = Enum.Material.Metal })
-	-- Tall vertical "high-bay door" stripes + a top band so it reads like a real VAB.
-	for i = -1, 2 do
+	-- Vehicle Assembly Building — towering, like the real VAB. Door faces the pad (-Z).
+	local vabCenter = Vector3.new(0, 80, 38)
+	buildHall(model, "VAB", vabCenter, Vector3.new(40, 160, 34), WHITE, Enum.Material.Concrete, 26, 150, -1)
+	local vabCore = part(model, { Name = "VehicleAssemblyBuilding", Size = Vector3.new(1, 1, 1), Position = vabCenter + Vector3.new(0, 82, 0), Transparency = 1, CanCollide = false })
+	nameTag(vabCore, "VEHICLE ASSEMBLY", 6)
+	-- Ground console beside the VAB for the rollout prompt.
+	local vab = part(model, { Name = "VABConsole", Size = Vector3.new(4, 3, 1.5), Position = Vector3.new(-14, 1.5, 18), Color = DARK, Material = Enum.Material.Metal })
+	-- Tall high-bay door framing + a top band so it reads like the real VAB.
+	for _, sx in { -16, 16 } do
 		part(model, {
 			Name = "VABStripe",
-			Size = Vector3.new(5, 46, 0.6),
-			Position = Vector3.new(i * 8 - 4, 24, 57.3),
+			Size = Vector3.new(5, 150, 0.6),
+			Position = Vector3.new(sx, 76, 20.6),
 			Color = Color3.fromRGB(70, 76, 92),
 			Material = Enum.Material.Metal,
 		})
 	end
 	part(model, {
 		Name = "VABBand",
-		Size = Vector3.new(34.6, 4, 34.6),
-		Position = Vector3.new(0, 50, 40),
+		Size = Vector3.new(41, 5, 35),
+		Position = Vector3.new(0, 152, 38),
 		Color = ACCENT,
 		Material = Enum.Material.Metal,
 	})
@@ -2239,46 +2250,52 @@ function WorldBuilder.build(): Complex
 		Material = Enum.Material.Slate,
 	})
 
-	-- Fixed service tower (lattice) beside the pad.
-	local towerX, towerZ = -13, -72
-	for _, c in { Vector3.new(-3, 0, -3), Vector3.new(3, 0, -3), Vector3.new(-3, 0, 3), Vector3.new(3, 0, 3) } do
+	-- Capsule height for the scaled rocket (matches buildRocket's ScaleTo). The crew
+	-- access arm + elevator align to this so boarding still works at the new scale.
+	local capsuleY = 1 + 44 * Config.Rocket.Scale
+
+	-- Fixed service tower (lattice) beside the pad, tall enough to reach the capsule.
+	local towerX, towerZ = -16, -72
+	local towerH = capsuleY + 8
+	for _, c in { Vector3.new(-3.5, 0, -3.5), Vector3.new(3.5, 0, -3.5), Vector3.new(-3.5, 0, 3.5), Vector3.new(3.5, 0, 3.5) } do
 		part(model, {
 			Name = "TowerLeg",
-			Size = Vector3.new(1, 56, 1),
-			Position = Vector3.new(towerX + c.X, 28, towerZ + c.Z),
+			Size = Vector3.new(1.5, towerH, 1.5),
+			Position = Vector3.new(towerX + c.X, towerH / 2, towerZ + c.Z),
 			Color = DARK,
 			Material = Enum.Material.Metal,
 		})
 	end
-	for level = 1, 6 do
-		local y = level * 8
-		part(model, { Name = "TowerBeam", Size = Vector3.new(7, 0.5, 0.5), Position = Vector3.new(towerX, y, towerZ - 3), Color = DARK, Material = Enum.Material.Metal })
-		part(model, { Name = "TowerBeam", Size = Vector3.new(7, 0.5, 0.5), Position = Vector3.new(towerX, y, towerZ + 3), Color = DARK, Material = Enum.Material.Metal })
-		part(model, { Name = "TowerBeam", Size = Vector3.new(0.5, 0.5, 7), Position = Vector3.new(towerX - 3, y, towerZ), Color = DARK, Material = Enum.Material.Metal })
-		part(model, { Name = "TowerBeam", Size = Vector3.new(0.5, 0.5, 7), Position = Vector3.new(towerX + 3, y, towerZ), Color = DARK, Material = Enum.Material.Metal })
+	for level = 1, math.floor(towerH / 14) do
+		local y = level * 14
+		part(model, { Name = "TowerBeam", Size = Vector3.new(8, 0.6, 0.6), Position = Vector3.new(towerX, y, towerZ - 3.5), Color = DARK, Material = Enum.Material.Metal })
+		part(model, { Name = "TowerBeam", Size = Vector3.new(8, 0.6, 0.6), Position = Vector3.new(towerX, y, towerZ + 3.5), Color = DARK, Material = Enum.Material.Metal })
+		part(model, { Name = "TowerBeam", Size = Vector3.new(0.6, 0.6, 8), Position = Vector3.new(towerX - 3.5, y, towerZ), Color = DARK, Material = Enum.Material.Metal })
+		part(model, { Name = "TowerBeam", Size = Vector3.new(0.6, 0.6, 8), Position = Vector3.new(towerX + 3.5, y, towerZ), Color = DARK, Material = Enum.Material.Metal })
 	end
 
 	-- Crew access arm (walkway) from the tower to the capsule hatch, at capsule height.
-	part(model, { Name = "CrewArm", Size = Vector3.new(11, 0.6, 3), Position = Vector3.new(-6.5, 44, towerZ), Color = Color3.fromRGB(150, 152, 160), Material = Enum.Material.Metal })
-	part(model, { Name = "ArmRail", Size = Vector3.new(11, 1.4, 0.3), Position = Vector3.new(-6.5, 45, towerZ - 1.4), Color = ACCENT, Material = Enum.Material.Metal })
-	part(model, { Name = "ArmRail", Size = Vector3.new(11, 1.4, 0.3), Position = Vector3.new(-6.5, 45, towerZ + 1.4), Color = ACCENT, Material = Enum.Material.Metal })
+	part(model, { Name = "CrewArm", Size = Vector3.new(16, 0.8, 4), Position = Vector3.new(-8, capsuleY, towerZ), Color = Color3.fromRGB(150, 152, 160), Material = Enum.Material.Metal })
+	part(model, { Name = "ArmRail", Size = Vector3.new(16, 1.6, 0.3), Position = Vector3.new(-8, capsuleY + 1.2, towerZ - 1.9), Color = ACCENT, Material = Enum.Material.Metal })
+	part(model, { Name = "ArmRail", Size = Vector3.new(16, 1.6, 0.3), Position = Vector3.new(-8, capsuleY + 1.2, towerZ + 1.9), Color = ACCENT, Material = Enum.Material.Metal })
 
 	-- Crew elevator at the tower base — ride it up to the access arm.
-	local elevatorCar = part(model, { Name = "ElevatorCar", Size = Vector3.new(4, 5, 4), Position = Vector3.new(towerX, 3, towerZ), Color = Color3.fromRGB(90, 94, 104), Material = Enum.Material.Metal, Transparency = 0.15 })
+	local elevatorCar = part(model, { Name = "ElevatorCar", Size = Vector3.new(5, 6, 5), Position = Vector3.new(towerX, 3, towerZ), Color = Color3.fromRGB(90, 94, 104), Material = Enum.Material.Metal, Transparency = 0.15 })
 	local elevatorPrompt = Instance.new("ProximityPrompt")
 	elevatorPrompt.Name = "ElevatorPrompt"
 	elevatorPrompt.ActionText = "Take Crew Elevator"
 	elevatorPrompt.ObjectText = "Service Tower"
 	elevatorPrompt.HoldDuration = 0.5
 	elevatorPrompt.RequiresLineOfSight = false
-	elevatorPrompt.MaxActivationDistance = 12
+	elevatorPrompt.MaxActivationDistance = 14
 	elevatorPrompt.Parent = elevatorCar
-	local crewArmTop = CFrame.lookAt(Vector3.new(towerX + 3, 45.5, towerZ), Vector3.new(0, 45.5, towerZ))
+	local crewArmTop = CFrame.lookAt(Vector3.new(towerX + 4, capsuleY + 1, towerZ), Vector3.new(0, capsuleY + 1, towerZ))
 
-	-- Lightning masts around the pad.
-	for _, m in { Vector3.new(-22, 0, -94), Vector3.new(22, 0, -94), Vector3.new(0, 0, -50) } do
-		part(model, { Name = "LightningMast", Size = Vector3.new(1.5, 78, 1.5), Position = Vector3.new(m.X, 39, m.Z), Color = Color3.fromRGB(120, 122, 130), Material = Enum.Material.Metal })
-		part(model, { Name = "MastTip", Shape = Enum.PartType.Ball, Size = Vector3.new(2.5, 2.5, 2.5), Position = Vector3.new(m.X, 79, m.Z), Color = Color3.fromRGB(200, 60, 50), Material = Enum.Material.Neon })
+	-- Lightning masts around the pad (three, like LC-39).
+	local mastH = capsuleY + 35
+	for _, m in { Vector3.new(-30, 0, -98), Vector3.new(30, 0, -98), Vector3.new(0, 0, -44) } do
+		part(model, { Name = "LightningMast", Size = Vector3.new(2.5, mastH, 2.5), Position = Vector3.new(m.X, mastH / 2, m.Z), Color = Color3.fromRGB(120, 122, 130), Material = Enum.Material.Metal })
+		part(model, { Name = "MastTip", Shape = Enum.PartType.Ball, Size = Vector3.new(3.5, 3.5, 3.5), Position = Vector3.new(m.X, mastH, m.Z), Color = Color3.fromRGB(200, 60, 50), Material = Enum.Material.Neon })
 	end
 
 	local rocket, seat, boardPrompt, engineFX = buildRocket(model, Vector3.new(padCenter.X, 1, padCenter.Z))
