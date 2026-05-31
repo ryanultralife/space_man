@@ -85,6 +85,12 @@ local function refreshMonitor()
 	complex.MonitorLabel.Text = `In orbit: {#deployedSats}\n\n` .. table.concat(lines, "\n")
 end
 
+local function setTelemetry(text: string)
+	if complex and complex.TelemetryLabel then
+		complex.TelemetryLabel.Text = text
+	end
+end
+
 local function setEngine(fx: BasePart?, on: boolean)
 	if not fx then
 		return
@@ -170,6 +176,7 @@ local function endFlight()
 	missionModel = nil
 	missionEngineFX = nil
 	missionResetCF = nil
+	setTelemetry("Standing by — no active mission.")
 end
 
 local function connectAborts()
@@ -217,6 +224,7 @@ local function runMission()
 				return
 			end
 			notifyCrew(`T-minus {n}...`)
+			setTelemetry(`T-MINUS {n}`)
 			task.wait(1)
 		end
 		if not inFlight then
@@ -224,6 +232,7 @@ local function runMission()
 		end
 
 		notifyCrew("🔥 Liftoff!")
+		setTelemetry("LIFTOFF 🔥")
 		setEngine(missionEngineFX, true)
 		for _, p in crew do
 			launchFX:FireClient(p, Config.Launch.AscentSeconds)
@@ -242,6 +251,7 @@ local function runMission()
 			end
 			local f = math.clamp(t / dur, 0, 1)
 			model:PivotTo(start + Vector3.new(0, height * f * f, 0))
+			setTelemetry(`ASCENT\nAlt: {math.floor(height * f * f)} m`)
 		end
 
 		notifyCrew(`🛰️ Stage separation — on course for {labelFor(missionDest)}.`)
@@ -262,6 +272,7 @@ local function runMission()
 			fadeCrew("in", 0.9)
 			task.wait(0.3)
 			notifyCrew(`🛬 Touchdown on {labelFor(missionDest)}! Explore — return via the ascent stage.`)
+			setTelemetry("TOUCHDOWN 🛬")
 			canReturn = true
 		else
 			placeCrewOrbit()
@@ -285,6 +296,7 @@ local function runMission()
 			table.insert(deployedSats, { name = name, status = "Nominal" })
 			refreshMonitor()
 			notifyCrew(`🛰️ {name} deployed and nominal — track it at Mission Control.`)
+			setTelemetry("IN ORBIT 🌍\nSatellite deployed")
 			canReturn = true
 		end
 	end)
@@ -423,6 +435,7 @@ local function onReturn(player: Player)
 		end
 
 		setParachute(false)
+		setTelemetry("SPLASHDOWN 🌊")
 		notifyCrew("🌊 Splashdown! You're floating safely — call for pickup.")
 		awaitingRescue = true
 		for _, p in crew do
@@ -596,6 +609,7 @@ function LaunchSystem.start(complexRef: any)
 	Players.PlayerRemoving:Connect(updateArtemisSign)
 	updateArtemisSign()
 	refreshMonitor()
+	setTelemetry("Standing by — no active mission.")
 
 	-- Kinematic rover driving while a player occupies the seat.
 	RunService.Heartbeat:Connect(function(dt: number)

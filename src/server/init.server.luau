@@ -40,6 +40,7 @@ local ok, err = pcall(function()
 	local SuitSystem = require(script.systems.SuitSystem)
 	local LaunchSystem = require(script.systems.LaunchSystem)
 	local RocketBoarding = require(script.systems.RocketBoarding)
+	local RocketBuilder = require(script.systems.RocketBuilder)
 
 	ServerCapacity.apply()
 	Workspace.Gravity = Config.Gravity[Config.CurrentWorld] or 196.2
@@ -48,6 +49,7 @@ local ok, err = pcall(function()
 	SuitSystem.start(complex)
 	LaunchSystem.start(complex)
 	RocketBoarding.start(complex, LaunchSystem)
+	RocketBuilder.start(complex, LaunchSystem)
 
 	print(`[space_man] server ready — world: {Config.CurrentWorld}, gravity: {Workspace.Gravity}`)
 end)

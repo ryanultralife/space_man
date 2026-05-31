@@ -51,6 +51,10 @@ export type Complex = {
 	ArtemisEngineFX: BasePart,
 	ArtemisStart: CFrame,
 	ArtemisSign: TextLabel,
+	BoostersPrompt: ProximityPrompt,
+	PayloadPrompt: ProximityPrompt,
+	BuildLabel: TextLabel,
+	TelemetryLabel: TextLabel,
 }
 
 local CONCRETE = Color3.fromRGB(150, 150, 158)
@@ -247,9 +251,66 @@ local function buildRocket(parent: Instance, base: Vector3): (Model, Seat, Proxi
 	light.Color = Color3.fromRGB(255, 170, 80)
 	light.Parent = engineFX
 
-	rocket.PrimaryPart = rocket:FindFirstChild("Stage1") :: BasePart
+	-- Axis-aligned root so the rocket builder can attach boosters at clean offsets.
+	local root = part(rocket, {
+		Name = "Root",
+		Size = Vector3.new(2, 2, 2),
+		Transparency = 1,
+		CanCollide = false,
+		CFrame = CFrame.new(bx, base.Y, bz),
+	})
+	rocket.PrimaryPart = root
 	rocket.Parent = parent
 	return rocket, seat, boardPrompt, engineFX
+end
+
+-- Rebuilds the strap-on boosters + payload colour from the rocket's attributes.
+function WorldBuilder.applyRocketBuild(rocket: Model)
+	local root = rocket:FindFirstChild("Root") :: BasePart?
+	if not root then
+		return
+	end
+	for _, d in rocket:GetChildren() do
+		if d:IsA("BasePart") and d.Name == "BuiltBooster" then
+			d:Destroy()
+		end
+	end
+
+	local boosters = rocket:GetAttribute("Boosters") or 0
+	local angles = {}
+	if boosters == 2 then
+		angles = { 0, 180 }
+	elseif boosters == 4 then
+		angles = { 0, 90, 180, 270 }
+	end
+	for _, deg in angles do
+		local a = math.rad(deg)
+		part(rocket, {
+			Name = "BuiltBooster",
+			Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(24, 4, 4),
+			Color = WHITE,
+			Material = Enum.Material.SmoothPlastic,
+			CFrame = root.CFrame * CFrame.new(math.cos(a) * 5.4, 14, math.sin(a) * 5.4) * CFrame.Angles(0, 0, math.rad(90)),
+		})
+		part(rocket, {
+			Name = "BuiltBooster",
+			Shape = Enum.PartType.Ball,
+			Size = Vector3.new(4, 4, 4),
+			Color = Color3.fromRGB(210, 80, 60),
+			Material = Enum.Material.SmoothPlastic,
+			CFrame = root.CFrame * CFrame.new(math.cos(a) * 5.4, 26.5, math.sin(a) * 5.4),
+		})
+	end
+
+	local payload = rocket:GetAttribute("Payload") or "Rover"
+	local pr = rocket:FindFirstChild("PayloadRover") :: BasePart?
+	if pr then
+		pr.Color = if payload == "Satellite"
+			then Color3.fromRGB(188, 194, 205)
+			elseif payload == "Crew" then Color3.fromRGB(235, 238, 244)
+			else Color3.fromRGB(220, 200, 80)
+	end
 end
 
 local function buildOrbitScene(parent: Instance, center: Vector3): (Seat, ProximityPrompt, Model, BasePart)
@@ -917,6 +978,50 @@ function WorldBuilder.build(): Complex
 	local crawlerVAB = crawler:GetPivot()
 	local crawlerPad = crawlerVAB + Vector3.new(0, 0, -90)
 
+	-- Rocket builder: configure the parked rocket before rollout.
+	rocket:SetAttribute("Boosters", 0)
+	rocket:SetAttribute("Payload", "Rover")
+	WorldBuilder.applyRocketBuild(rocket)
+
+	local boostersConsole = part(model, { Name = "BoostersConsole", Size = Vector3.new(5, 3, 2), Position = Vector3.new(11, 1.5, 16), Color = Color3.fromRGB(44, 48, 58), Material = Enum.Material.Metal })
+	local payloadConsole = part(model, { Name = "PayloadConsole", Size = Vector3.new(5, 3, 2), Position = Vector3.new(17, 1.5, 16), Color = Color3.fromRGB(44, 48, 58), Material = Enum.Material.Metal })
+
+	local buildBillboard = Instance.new("BillboardGui")
+	buildBillboard.Name = "BuildPlan"
+	buildBillboard.Size = UDim2.new(0, 320, 0, 44)
+	buildBillboard.StudsOffsetWorldSpace = Vector3.new(3, 3, 0)
+	buildBillboard.AlwaysOnTop = true
+	buildBillboard.MaxDistance = 100
+	buildBillboard.Adornee = boostersConsole
+	local buildLabel = Instance.new("TextLabel")
+	buildLabel.Size = UDim2.fromScale(1, 1)
+	buildLabel.BackgroundTransparency = 1
+	buildLabel.Font = Enum.Font.GothamBold
+	buildLabel.TextColor3 = Color3.fromRGB(255, 220, 150)
+	buildLabel.TextStrokeTransparency = 0.4
+	buildLabel.TextScaled = true
+	buildLabel.Text = "🔧 Boosters: 0  |  Payload: Rover"
+	buildLabel.Parent = buildBillboard
+	buildBillboard.Parent = boostersConsole
+
+	local boostersPrompt = Instance.new("ProximityPrompt")
+	boostersPrompt.Name = "BoostersPrompt"
+	boostersPrompt.ActionText = "Cycle Boosters"
+	boostersPrompt.ObjectText = "Rocket Builder"
+	boostersPrompt.HoldDuration = 0.3
+	boostersPrompt.RequiresLineOfSight = false
+	boostersPrompt.MaxActivationDistance = 10
+	boostersPrompt.Parent = boostersConsole
+
+	local payloadPrompt = Instance.new("ProximityPrompt")
+	payloadPrompt.Name = "PayloadPrompt"
+	payloadPrompt.ActionText = "Cycle Payload"
+	payloadPrompt.ObjectText = "Rocket Builder"
+	payloadPrompt.HoldDuration = 0.3
+	payloadPrompt.RequiresLineOfSight = false
+	payloadPrompt.MaxActivationDistance = 10
+	payloadPrompt.Parent = payloadConsole
+
 	-- Ocean east of the Cape. Prefer real terrain water; fall back to a water-coloured
 	-- part if the place has no Terrain object (so this can never crash the build).
 	local terrain = Workspace:FindFirstChildOfClass("Terrain")
@@ -1045,6 +1150,45 @@ function WorldBuilder.build(): Complex
 	monitorLabel.Text = "Initializing..."
 	monitorLabel.Parent = monitorBg
 
+	-- Mission Control launch-telemetry screen (next to the satellite monitor).
+	local telemetryPart = part(model, {
+		Name = "TelemetryScreen",
+		Size = Vector3.new(0.4, 7, 12),
+		Position = Vector3.new(-40.6, 8, 6),
+		Color = Color3.fromRGB(8, 12, 16),
+		Material = Enum.Material.SmoothPlastic,
+	})
+	local telemetryGui = Instance.new("SurfaceGui")
+	telemetryGui.Name = "Telemetry"
+	telemetryGui.Face = Enum.NormalId.Right
+	telemetryGui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	telemetryGui.PixelsPerStud = 50
+	telemetryGui.Parent = telemetryPart
+	local telemetryBg = Instance.new("Frame")
+	telemetryBg.Size = UDim2.fromScale(1, 1)
+	telemetryBg.BackgroundColor3 = Color3.fromRGB(8, 12, 16)
+	telemetryBg.BorderSizePixel = 0
+	telemetryBg.Parent = telemetryGui
+	local telemetryTitle = Instance.new("TextLabel")
+	telemetryTitle.Size = UDim2.new(1, 0, 0, 64)
+	telemetryTitle.BackgroundTransparency = 1
+	telemetryTitle.Font = Enum.Font.GothamBold
+	telemetryTitle.TextColor3 = Color3.fromRGB(120, 210, 255)
+	telemetryTitle.TextScaled = true
+	telemetryTitle.Text = "🚀 LAUNCH CONTROL"
+	telemetryTitle.Parent = telemetryBg
+	local telemetryLabel = Instance.new("TextLabel")
+	telemetryLabel.Position = UDim2.new(0, 18, 0, 74)
+	telemetryLabel.Size = UDim2.new(1, -36, 1, -86)
+	telemetryLabel.BackgroundTransparency = 1
+	telemetryLabel.Font = Enum.Font.Code
+	telemetryLabel.TextColor3 = Color3.fromRGB(120, 255, 170)
+	telemetryLabel.TextXAlignment = Enum.TextXAlignment.Left
+	telemetryLabel.TextYAlignment = Enum.TextYAlignment.Top
+	telemetryLabel.TextSize = 26
+	telemetryLabel.Text = "Standing by."
+	telemetryLabel.Parent = telemetryBg
+
 	return {
 		Model = model,
 		Rocket = rocket,
@@ -1084,6 +1228,10 @@ function WorldBuilder.build(): Complex
 		ArtemisEngineFX = artemisEngineFX,
 		ArtemisStart = artemisStart,
 		ArtemisSign = artemisSign,
+		BoostersPrompt = boostersPrompt,
+		PayloadPrompt = payloadPrompt,
+		BuildLabel = buildLabel,
+		TelemetryLabel = telemetryLabel,
 	}
 end
 
