@@ -7,6 +7,7 @@
 
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Lighting = game:GetService("Lighting")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 
@@ -857,7 +858,56 @@ function WorldBuilder.makeBoat(position: Vector3): Model
 	return boat
 end
 
+local function setupScenery()
+	-- Florida-afternoon lighting with atmosphere, bloom and sun rays for realism.
+	Lighting.ClockTime = 14.5
+	Lighting.Brightness = 2.5
+	Lighting.ExposureCompensation = 0.15
+	Lighting.EnvironmentDiffuseScale = 1
+	Lighting.EnvironmentSpecularScale = 1
+	Lighting.OutdoorAmbient = Color3.fromRGB(140, 150, 165)
+	Lighting.GeographicLatitude = 28.5
+
+	if not Lighting:FindFirstChildOfClass("Atmosphere") then
+		local atmos = Instance.new("Atmosphere")
+		atmos.Density = 0.34
+		atmos.Haze = 1.4
+		atmos.Glare = 0.2
+		atmos.Color = Color3.fromRGB(199, 207, 217)
+		atmos.Decay = Color3.fromRGB(150, 170, 200)
+		atmos.Parent = Lighting
+	end
+	if not Lighting:FindFirstChildOfClass("BloomEffect") then
+		local bloom = Instance.new("BloomEffect")
+		bloom.Intensity = 0.6
+		bloom.Size = 24
+		bloom.Threshold = 1.1
+		bloom.Parent = Lighting
+	end
+	if not Lighting:FindFirstChildOfClass("SunRaysEffect") then
+		local rays = Instance.new("SunRaysEffect")
+		rays.Intensity = 0.12
+		rays.Spread = 0.6
+		rays.Parent = Lighting
+	end
+	if not Lighting:FindFirstChildOfClass("ColorCorrectionEffect") then
+		local cc = Instance.new("ColorCorrectionEffect")
+		cc.Contrast = 0.08
+		cc.Saturation = 0.08
+		cc.Parent = Lighting
+	end
+
+	-- Make the static baseplate look like real grass.
+	local baseplate = Workspace:FindFirstChild("Baseplate")
+	if baseplate and baseplate:IsA("BasePart") then
+		baseplate.Material = Enum.Material.Grass
+		baseplate.Color = Color3.fromRGB(86, 122, 74)
+	end
+end
+
 function WorldBuilder.build(): Complex
+	setupScenery()
+
 	local model = Instance.new("Model")
 	model.Name = "SpaceMan"
 	model.Parent = Workspace
@@ -869,10 +919,10 @@ function WorldBuilder.build(): Complex
 	buildHall(model, "Suit", suitCenter, Vector3.new(16, 12, 12), Color3.fromRGB(214, 217, 224), Enum.Material.Concrete, 5, 8, 1)
 	local suitStation = part(model, {
 		Name = "SuitStation",
-		Size = Vector3.new(18, 1, 14),
-		Position = suitCenter + Vector3.new(0, 6.5, 0),
-		Color = ACCENT,
-		Material = Enum.Material.Metal,
+		Size = Vector3.new(17, 1, 13),
+		Position = suitCenter + Vector3.new(0, 6, 0),
+		Color = Color3.fromRGB(150, 152, 160),
+		Material = Enum.Material.Concrete,
 	})
 	nameTag(suitStation, "🧑‍🚀 SUIT-UP ROOM", 3)
 	local suitConsole = part(model, {
