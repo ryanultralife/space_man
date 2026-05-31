@@ -1,10 +1,15 @@
 --!strict
--- Orchestrates a full mission: countdown → ignition → ascent → orbit → satellite
--- deploy → re-entry under parachute → ocean splashdown → rescue-boat pickup → home.
+-- Orchestrates a full mission. The flight-plan console picks a destination:
+--   * Earth Orbit  → orbit scene + satellite deploy
+--   * Moon / Mars  → low-gravity surface, deploy + drive the rover
+-- Either way: countdown → ignition → ascent → arrival, and "Return to Earth"
+-- brings you home via a parachute splashdown + rescue-boat pickup.
 -- One astronaut flies at a time; the flow self-resets if they die or leave.
 
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
@@ -18,6 +23,10 @@ local screen = Remotes.event("Screen")
 local rescuePrompt = Remotes.event("RescuePrompt")
 local rescue = Remotes.event("Rescue")
 
+local DEST_LABEL = { EarthOrbit = "Earth Orbit", Moon = "the Moon", Mars = "Mars" }
+local MOON_GROUND = Color3.fromRGB(150, 150, 156)
+local MARS_GROUND = Color3.fromRGB(170, 92, 58)
+
 local complex: any = nil
 local inFlight = false
 local canReturn = false
@@ -25,6 +34,10 @@ local awaitingRescue = false
 local flyingPlayer: Player? = nil
 local savedLighting: { [string]: any }? = nil
 local abortConn: RBXScriptConnection? = nil
+
+local function label(dest: string): string
+	return DEST_LABEL[dest] or dest
+end
 
 local function setEngine(on: boolean)
 	for _, d in complex.EngineFX:GetChildren() do
@@ -47,6 +60,9 @@ local function setParachute(show: boolean)
 end
 
 local function setSpaceLighting()
+	if savedLighting then
+		return
+	end
 	savedLighting = {
 		ClockTime = Lighting.ClockTime,
 		Brightness = Lighting.Brightness,
@@ -88,6 +104,7 @@ local function endFlight()
 		abortConn = nil
 	end
 	restoreLighting()
+	Workspace.Gravity = Config.Gravity.Earth
 	resetRocket()
 	resetDescent()
 	inFlight = false
@@ -100,6 +117,11 @@ local function fade(player: Player, action: string, duration: number)
 	screen:FireClient(player, action, duration)
 end
 
+local function humanoidOf(player: Player): Humanoid?
+	local character = player.Character
+	return character and character:FindFirstChildOfClass("Humanoid")
+end
+
 function LaunchSystem.isBusy(): boolean
 	return inFlight
 end
@@ -109,12 +131,11 @@ function LaunchSystem.beginCountdown(player: Player)
 		notify:FireClient(player, "A launch is already in progress — stand by.")
 		return
 	end
-	local character = player.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if not humanoid then
+	if not humanoidOf(player) then
 		return
 	end
 
+	local dest = complex.FlightConsole:GetAttribute("Dest") or "EarthOrbit"
 	inFlight = true
 	flyingPlayer = player
 	abortConn = player.CharacterRemoving:Connect(endFlight)
@@ -149,7 +170,7 @@ function LaunchSystem.beginCountdown(player: Player)
 			complex.Rocket:PivotTo(start + Vector3.new(0, height * f * f, 0))
 		end
 
-		notify:FireClient(player, "🛰️ Stage separation — coasting to orbit.")
+		notify:FireClient(player, `🛰️ Stage separation — on course for {label(dest)}.`)
 		task.wait(1)
 		if not inFlight then
 			return
@@ -159,28 +180,50 @@ function LaunchSystem.beginCountdown(player: Player)
 		task.wait(Config.Launch.FadeSeconds + 0.1)
 		setSpaceLighting()
 
-		local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-		if hum then
-			complex.OrbitSeat:Sit(hum)
+		if dest == "Moon" or dest == "Mars" then
+			-- Land on the surface and deploy the rover.
+			Workspace.Gravity = Config.Gravity[dest] or Config.Gravity.Moon
+			complex.SurfaceGround.Color = if dest == "Mars" then MARS_GROUND else MOON_GROUND
+
+			local hum = humanoidOf(player)
+			if hum then
+				hum.Sit = false
+			end
+			task.wait(0.15)
+			if player.Character then
+				player.Character:PivotTo(complex.SurfaceSpawn)
+			end
+			resetRocket()
+
+			fade(player, "in", 0.9)
+			task.wait(0.3)
+			notify:FireClient(player, `🛬 Touchdown on {label(dest)}! Walk up to your rover and drive — return via the ascent stage.`)
+			canReturn = true
+		else
+			-- Earth orbit + satellite deploy.
+			local hum = humanoidOf(player)
+			if hum then
+				complex.OrbitSeat:Sit(hum)
+			end
+			task.wait(0.1)
+			resetRocket()
+
+			fade(player, "in", 0.8)
+			task.wait(0.8)
+			notify:FireClient(player, "🌍 Orbit achieved! Deploying satellite...")
+
+			local sat = complex.Satellite
+			local from = sat:GetPivot()
+			local st = 0
+			while st < 3 do
+				local dt = task.wait()
+				st += dt
+				sat:PivotTo(from + Vector3.new(math.min(st, 3) * 6, 0, 0))
+			end
+
+			notify:FireClient(player, "🛰️ Satellite deployed. Use the capsule's prompt to head home.")
+			canReturn = true
 		end
-		task.wait(0.1)
-		resetRocket()
-
-		fade(player, "in", 0.8)
-		task.wait(0.8)
-		notify:FireClient(player, "🌍 Orbit achieved! Deploying satellite...")
-
-		local sat = complex.Satellite
-		local from = sat:GetPivot()
-		local st = 0
-		while st < 3 do
-			local dt = task.wait()
-			st += dt
-			sat:PivotTo(from + Vector3.new(math.min(st, 3) * 6, 0, 0))
-		end
-
-		notify:FireClient(player, "🛰️ Satellite deployed. Use the capsule's prompt to head home.")
-		canReturn = true
 	end)
 end
 
@@ -194,11 +237,14 @@ local function onReturn(player: Player)
 		fade(player, "out", 0.7)
 		task.wait(0.8)
 		restoreLighting()
+		Workspace.Gravity = Config.Gravity.Earth
 
 		complex.DescentRig:PivotTo(complex.DescentStart)
 		setParachute(true)
-		local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+		local hum = humanoidOf(player)
 		if hum then
+			hum.Sit = false
+			task.wait(0.05)
 			complex.DescentSeat:Sit(hum)
 		end
 
@@ -222,7 +268,7 @@ local function onReturn(player: Player)
 			complex.DescentRig:PivotTo(CFrame.new(sx + sway, y, sz))
 		end
 
-		setParachute(false) -- chute released on touchdown
+		setParachute(false)
 		notify:FireClient(player, "🌊 Splashdown! You're floating safely — call for pickup.")
 		awaitingRescue = true
 		rescuePrompt:FireClient(player, true)
@@ -266,11 +312,54 @@ function LaunchSystem.requestRescue(player: Player)
 	end)
 end
 
+local function onCycleDestination(player: Player)
+	if inFlight then
+		notify:FireClient(player, "Can't change the flight plan mid-mission.")
+		return
+	end
+	local cur = complex.FlightConsole:GetAttribute("Dest") or "EarthOrbit"
+	local idx = table.find(Config.Destinations, cur) or 1
+	local nextDest = Config.Destinations[(idx % #Config.Destinations) + 1]
+	complex.FlightConsole:SetAttribute("Dest", nextDest)
+	complex.FlightLabel.Text = "Destination: " .. label(nextDest)
+	notify:FireClient(player, "🧭 Destination set: " .. label(nextDest))
+end
+
+local function onDrive(player: Player)
+	local character = player.Character
+	local hrp = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not hrp then
+		return
+	end
+	-- Lift the player onto the seat; the VehicleSeat grabs them on contact.
+	hrp.CFrame = complex.RoverSeat.CFrame * CFrame.new(0, 2, 0)
+end
+
 function LaunchSystem.start(complexRef: any)
 	complex = complexRef
 	complex.OrbitReturnPrompt.Triggered:Connect(onReturn)
+	complex.SurfaceReturnPrompt.Triggered:Connect(onReturn)
+	complex.FlightCyclePrompt.Triggered:Connect(onCycleDestination)
+	complex.RoverDrivePrompt.Triggered:Connect(onDrive)
+
 	rescue.OnServerEvent:Connect(function(player: Player)
 		LaunchSystem.requestRescue(player)
+	end)
+
+	-- Kinematic rover driving while a player occupies the seat.
+	RunService.Heartbeat:Connect(function(dt: number)
+		local seat = complex.RoverSeat
+		if not seat.Occupant then
+			return
+		end
+		local throttle = seat.ThrottleFloat
+		local steer = seat.SteerFloat
+		if throttle == 0 and steer == 0 then
+			return
+		end
+		local turn = -steer * Config.Rover.TurnRate * dt
+		local fwd = throttle * Config.Rover.Speed * dt
+		complex.Rover:PivotTo(complex.Rover:GetPivot() * CFrame.Angles(0, turn, 0) * CFrame.new(0, 0, -fwd))
 	end)
 end
 

@@ -57,4 +57,16 @@ Config.Ocean = {
 	Size = Vector3.new(760, 40, 520),
 }
 
+Config.Rover = {
+	Speed = 42,
+	TurnRate = 1.8,
+}
+
+Config.Surface = {
+	-- Reusable surface world (recoloured per destination), far from the launch site.
+	Center = Vector3.new(0, 0, 12000),
+}
+
+Config.Destinations = { "EarthOrbit", "Moon", "Mars" }
+
 return Config

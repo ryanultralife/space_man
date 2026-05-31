@@ -26,6 +26,11 @@ syncs live into Roblox Studio.
   of sinking.
 - **Rescue**: a small "Activate Rescue Boats" button appears; press it and a rescue
   boat drives out, picks you up, and brings you back to the Cape.
+- **Destinations**: a flight-plan console at the Cape switches the mission between
+  **Earth Orbit**, the **Moon**, and **Mars**.
+- **Rover payload**: the rover rides in the rocket's (semi-transparent) fairing, then
+  **deploys on the Moon/Mars surface** — walk up and **drive it** in low gravity around
+  a small surface base. Head to the ascent stage to splash down home.
 - On-screen toast notifications, screen fades, and a small action button (client HUD).
 
 ## Roadmap
@@ -35,7 +40,7 @@ syncs live into Roblox Studio.
 3. ✅ Launch & ascent → **orbit** with satellite deployment + return
 4. **Mission Control** satellite-monitoring screen
 5. ✅ Re-entry + **splashdown**: float under parachute, small "Activate Rescue Boats" pickup
-6. New worlds: **Moon & Mars** (low gravity), rovers, surface stations
+6. ✅ New worlds: **Moon & Mars** (low gravity), a drivable rover payload, surface base
 
 > Note: while a player is in orbit the whole place switches to a starry "space"
 > lighting (it's global for now). Multiplayer worlds will move to separate Roblox
@@ -51,7 +56,7 @@ src/
 ├── server/
 │   ├── init.server.luau
 │   └── systems/
-│       ├── WorldBuilder.luau    # builds the launch complex, rocket, and orbit scene
+│       ├── WorldBuilder.luau    # builds the complex, rocket, orbit, ocean, surface + rover
 │       ├── SuitSystem.luau      # suit-up prompt + avatar suit visuals
 │       ├── RocketBoarding.luau  # boarding gated on having a suit
 │       └── LaunchSystem.luau    # countdown → ascent → orbit → satellite → return
