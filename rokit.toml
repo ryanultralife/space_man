@@ -1,0 +1,6 @@
+# Rokit toolchain manifest (https://github.com/rojo-rbx/rokit)
+# Run `rokit install` to install pinned tools into this project.
+# Rojo is already installed globally (7.5.1); this pins it for reproducibility.
+
+[tools]
+rojo = "rojo-rbx/rojo@7.5.1"
