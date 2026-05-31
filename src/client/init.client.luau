@@ -1,9 +1,14 @@
 --!strict
--- Client entry point. Runs on each player's device.
--- (This becomes a LocalScript named "Client" in StarterPlayerScripts.)
+-- Client entry point. Sets up the HUD and shows server notifications.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Greeting = require(ReplicatedStorage.Shared.Greeting)
+local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local Notifier = require(script.ui.Notifier)
 
-print(`[client] {Greeting.message()}`)
+Notifier.init()
+
+local notify = Remotes.event("Notify")
+notify.OnClientEvent:Connect(function(message: string)
+	Notifier.show(message)
+end)
