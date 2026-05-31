@@ -35,15 +35,20 @@ syncs live into Roblox Studio.
   out to the pad** (~30s) before you can board.
 - **Mission Control monitor**: a screen on the MC building tracks every satellite you've
   deployed in orbit.
+- **Artemis crew rocket**: in a private server with 2+ players, an original 4-seat Artemis
+  (core stage + two boosters + Orion-style capsule) unlocks on its own pad — the crew boards,
+  launches together, lands on the Moon, and comes home by splashdown.
 - On-screen toast notifications, screen fades, and a small action button (client HUD).
 
 ## Servers
 
-- **Normal (public) server: solo** — 1 player. (Fits the game — one astronaut flies at a time.)
-- **Private server: free, up to 5 players** — the owner invites their chosen friends.
+- **Normal (public) server: solo** — 1 player.
+- **Private server: free, up to 4 players** — the owner invites their chosen friends.
+- In a private server with **2+ players**, the **Artemis** crew rocket unlocks (4 seats)
+  so your crew can fly to the Moon together.
 
 The caps are enforced in code (`ServerCapacity`): public servers drop to **1**, player-owned
-private servers allow **5**. The place ceiling is 5 (`default.project.json`). **Making private
+private servers allow **4**. The place ceiling is 4 (`default.project.json`). **Making private
 servers free is a one-time settings toggle** (you can't do it in code): after publishing the
 game, in the Creator Dashboard go to **Monetization → Private Servers → On** and set the price
 to **Free**. In Studio playtests `PrivateServerOwnerId` is 0, so it behaves like a public (solo) server.

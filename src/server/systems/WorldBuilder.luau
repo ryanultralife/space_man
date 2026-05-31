@@ -43,6 +43,14 @@ export type Complex = {
 	CrawlerPad: CFrame,
 	RolloutPrompt: ProximityPrompt,
 	MonitorLabel: TextLabel,
+	OrbitDeck: BasePart,
+	Artemis: Model,
+	ArtemisSeats: { Seat },
+	ArtemisBoardPrompt: ProximityPrompt,
+	ArtemisLaunchPrompt: ProximityPrompt,
+	ArtemisEngineFX: BasePart,
+	ArtemisStart: CFrame,
+	ArtemisSign: TextLabel,
 }
 
 local CONCRETE = Color3.fromRGB(150, 150, 158)
@@ -244,7 +252,7 @@ local function buildRocket(parent: Instance, base: Vector3): (Model, Seat, Proxi
 	return rocket, seat, boardPrompt, engineFX
 end
 
-local function buildOrbitScene(parent: Instance, center: Vector3): (Seat, ProximityPrompt, Model)
+local function buildOrbitScene(parent: Instance, center: Vector3): (Seat, ProximityPrompt, Model, BasePart)
 	local cx, cy, cz = center.X, center.Y, center.Z
 	local earthCenter = Vector3.new(cx, cy - 520, cz)
 
@@ -320,7 +328,16 @@ local function buildOrbitScene(parent: Instance, center: Vector3): (Seat, Proxim
 	-- Pre-placed satellite (scenery); player-deployed ones are spawned at runtime.
 	local satellite = WorldBuilder.makeSatellite(Vector3.new(cx + 26, cy + 5, cz))
 
-	return orbitSeat, returnPrompt, satellite
+	-- Standing deck for extra crew members (the lone OrbitSeat only seats one).
+	local deck = part(parent, {
+		Name = "OrbitDeck",
+		Size = Vector3.new(16, 1, 16),
+		Position = Vector3.new(cx, cy - 1, cz),
+		Color = Color3.fromRGB(70, 74, 82),
+		Material = Enum.Material.DiamondPlate,
+	})
+
+	return orbitSeat, returnPrompt, satellite, deck
 end
 
 local function buildDescentRig(parent: Instance, base: Vector3): (Model, Seat)
@@ -596,6 +613,142 @@ local function buildCrawler(parent: Instance, pos: Vector3): Model
 	return crawler
 end
 
+local function buildArtemis(parent: Instance, base: Vector3): (Model, { Seat }, ProximityPrompt, ProximityPrompt, BasePart, TextLabel)
+	local bx, bz = base.X, base.Z
+	local artemis = Instance.new("Model")
+	artemis.Name = "Artemis"
+	local ORANGE = Color3.fromRGB(196, 98, 40)
+
+	-- Core stage + skirt + engine cluster
+	vcyl(artemis, "Core", bx, bz, base.Y + 17, 34, 8, ORANGE)
+	vcyl(artemis, "CoreSkirt", bx, bz, base.Y + 2.5, 3, 8.3, DARK)
+	for i = 0, 3 do
+		local a = math.rad(i * 90)
+		vcyl(artemis, "Nozzle", bx + math.cos(a) * 2.2, bz + math.sin(a) * 2.2, base.Y + 2, 2.6, 1.8, NOZZLE)
+	end
+
+	-- Two solid boosters
+	for _, sx in { -6.4, 6.4 } do
+		vcyl(artemis, "Booster", bx + sx, bz, base.Y + 14, 28, 4, WHITE)
+		vcyl(artemis, "BoosterNose", bx + sx, bz, base.Y + 29.5, 3, 4, Color3.fromRGB(210, 80, 60))
+		vcyl(artemis, "BoosterNozzle", bx + sx, bz, base.Y + 1.6, 2, 2.8, NOZZLE)
+	end
+
+	-- Service module + tapered Orion-style capsule
+	vcyl(artemis, "Service", bx, bz, base.Y + 36, 4, 7, Color3.fromRGB(150, 152, 160))
+	local capBase = vcyl(artemis, "Capsule", bx, bz, base.Y + 40, 4, 7.6, WHITE)
+	vcyl(artemis, "Capsule", bx, bz, base.Y + 43, 2.5, 5.4, WHITE)
+	vcyl(artemis, "Capsule", bx, bz, base.Y + 45, 1.5, 3.4, WHITE)
+	part(artemis, {
+		Name = "Tip",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(3.4, 3.4, 3.4),
+		Color = WHITE,
+		Material = Enum.Material.SmoothPlastic,
+		CFrame = CFrame.new(bx, base.Y + 46.4, bz),
+	})
+
+	-- Four crew seats inside the capsule
+	local seats: { Seat } = {}
+	for i = 0, 3 do
+		local ox = if i % 2 == 0 then -1.6 else 1.6
+		local oz = if i < 2 then -1.6 else 1.6
+		local s = Instance.new("Seat")
+		s.Name = "ArtemisSeat"
+		s.Anchored = true
+		s.CanCollide = false
+		s.Transparency = 1
+		s.Size = Vector3.new(2.2, 1, 2.2)
+		s.CFrame = CFrame.new(bx + ox, base.Y + 39, bz + oz)
+		s.Parent = artemis
+		table.insert(seats, s)
+	end
+
+	-- Engine effects
+	local engineFX = part(artemis, {
+		Name = "EngineFX",
+		Size = Vector3.new(1, 1, 1),
+		Transparency = 1,
+		CanCollide = false,
+		CFrame = CFrame.new(bx, base.Y + 0.6, bz),
+	})
+	local flame = Instance.new("ParticleEmitter")
+	flame.Name = "Flame"
+	flame.Enabled = false
+	flame.EmissionDirection = Enum.NormalId.Bottom
+	flame.Rate = 200
+	flame.Lifetime = NumberRange.new(0.3, 0.8)
+	flame.Speed = NumberRange.new(30, 55)
+	flame.SpreadAngle = Vector2.new(14, 14)
+	flame.LightEmission = 1
+	flame.Color = ColorSequence.new(Color3.fromRGB(255, 190, 70), Color3.fromRGB(255, 90, 25))
+	flame.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 3), NumberSequenceKeypoint.new(1, 8) })
+	flame.Parent = engineFX
+	local smoke = Instance.new("ParticleEmitter")
+	smoke.Name = "Smoke"
+	smoke.Enabled = false
+	smoke.EmissionDirection = Enum.NormalId.Bottom
+	smoke.Rate = 90
+	smoke.Lifetime = NumberRange.new(1, 2.2)
+	smoke.Speed = NumberRange.new(14, 26)
+	smoke.SpreadAngle = Vector2.new(28, 28)
+	smoke.Color = ColorSequence.new(Color3.fromRGB(225, 225, 225))
+	smoke.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 5), NumberSequenceKeypoint.new(1, 14) })
+	smoke.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.25), NumberSequenceKeypoint.new(1, 1) })
+	smoke.Parent = engineFX
+	local light = Instance.new("PointLight")
+	light.Name = "EngineLight"
+	light.Enabled = false
+	light.Brightness = 7
+	light.Range = 40
+	light.Color = Color3.fromRGB(255, 170, 80)
+	light.Parent = engineFX
+
+	-- Board low on the skirt; LAUNCH up by the crew seats (only seated crew can reach it).
+	local skirt = artemis:FindFirstChild("CoreSkirt") :: BasePart
+	local boardPrompt = Instance.new("ProximityPrompt")
+	boardPrompt.Name = "ArtemisBoardPrompt"
+	boardPrompt.ActionText = "Board Artemis"
+	boardPrompt.ObjectText = "Artemis — crew of 4"
+	boardPrompt.HoldDuration = 0.4
+	boardPrompt.RequiresLineOfSight = false
+	boardPrompt.MaxActivationDistance = 16
+	boardPrompt.KeyboardKeyCode = Enum.KeyCode.E
+	boardPrompt.Parent = skirt
+
+	local launchPrompt = Instance.new("ProximityPrompt")
+	launchPrompt.Name = "ArtemisLaunchPrompt"
+	launchPrompt.ActionText = "LAUNCH Crew"
+	launchPrompt.ObjectText = "Artemis"
+	launchPrompt.HoldDuration = 1
+	launchPrompt.RequiresLineOfSight = false
+	launchPrompt.MaxActivationDistance = 12
+	launchPrompt.KeyboardKeyCode = Enum.KeyCode.G
+	launchPrompt.Parent = capBase
+
+	local signGui = Instance.new("BillboardGui")
+	signGui.Name = "ArtemisSign"
+	signGui.Size = UDim2.new(0, 360, 0, 50)
+	signGui.StudsOffsetWorldSpace = Vector3.new(0, 30, 0)
+	signGui.AlwaysOnTop = true
+	signGui.MaxDistance = 450
+	signGui.Adornee = capBase
+	local signLabel = Instance.new("TextLabel")
+	signLabel.Size = UDim2.fromScale(1, 1)
+	signLabel.BackgroundTransparency = 1
+	signLabel.Font = Enum.Font.GothamBold
+	signLabel.TextColor3 = Color3.fromRGB(255, 210, 120)
+	signLabel.TextStrokeTransparency = 0.4
+	signLabel.TextScaled = true
+	signLabel.Text = "ARTEMIS"
+	signLabel.Parent = signGui
+	signGui.Parent = capBase
+
+	artemis.PrimaryPart = artemis:FindFirstChild("Core") :: BasePart
+	artemis.Parent = parent
+	return artemis, seats, boardPrompt, launchPrompt, engineFX, signLabel
+end
+
 function WorldBuilder.makeBoat(position: Vector3): Model
 	local boat = Instance.new("Model")
 	boat.Name = "RescueBoat"
@@ -702,7 +855,7 @@ function WorldBuilder.build(): Complex
 	end
 
 	local rocket, seat, boardPrompt, engineFX = buildRocket(model, Vector3.new(padCenter.X, 1, padCenter.Z))
-	local orbitSeat, orbitReturnPrompt, satellite = buildOrbitScene(model, Config.Orbit.Center)
+	local orbitSeat, orbitReturnPrompt, satellite, orbitDeck = buildOrbitScene(model, Config.Orbit.Center)
 
 	-- Park the rocket at the VAB on a crawler-transporter; it rolls out to the pad later.
 	local rocketPad = rocket:GetPivot()
@@ -724,6 +877,18 @@ function WorldBuilder.build(): Complex
 	-- Surface world (Moon / Mars, recoloured per destination) with the deployable rover.
 	local surfaceGround, surfaceSpawn, rover, roverSeat, roverDrivePrompt, surfaceReturnPrompt =
 		buildSurface(model, Config.Surface.Center)
+
+	-- Second pad + the Artemis (crewed Moon rocket); unlocked in private servers.
+	part(model, {
+		Name = "ArtemisPad",
+		Size = Vector3.new(40, 1, 40),
+		Position = Vector3.new(90, 0.5, -72),
+		Color = DARK,
+		Material = Enum.Material.Slate,
+	})
+	local artemis, artemisSeats, artemisBoardPrompt, artemisLaunchPrompt, artemisEngineFX, artemisSign =
+		buildArtemis(model, Vector3.new(90, 1, -72))
+	local artemisStart = artemis:GetPivot()
 
 	-- Flight-plan console near the pad to pick a destination.
 	local flightConsole = part(model, {
@@ -846,6 +1011,14 @@ function WorldBuilder.build(): Complex
 		CrawlerPad = crawlerPad,
 		RolloutPrompt = rolloutPrompt,
 		MonitorLabel = monitorLabel,
+		OrbitDeck = orbitDeck,
+		Artemis = artemis,
+		ArtemisSeats = artemisSeats,
+		ArtemisBoardPrompt = artemisBoardPrompt,
+		ArtemisLaunchPrompt = artemisLaunchPrompt,
+		ArtemisEngineFX = artemisEngineFX,
+		ArtemisStart = artemisStart,
+		ArtemisSign = artemisSign,
 	}
 end
 

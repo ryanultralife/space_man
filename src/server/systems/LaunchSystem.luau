@@ -1,12 +1,15 @@
 --!strict
--- Orchestrates a full mission. The rocket is assembled at the VAB and must be
--- rolled out to the pad first. The flight-plan console picks a destination:
---   * Earth Orbit  → orbit scene + satellite deploy (tracked at Mission Control)
---   * Moon / Mars  → low-gravity surface, deploy + drive the rover
--- "Return to Earth" brings you home via a parachute splashdown + rescue-boat pickup.
--- One astronaut flies at a time; the flow self-resets if they die or leave.
+-- Orchestrates missions for a CREW (1 player for the Standard rocket, up to 4 for the
+-- Artemis). A mission: countdown → ignition → ascent → arrival (orbit + satellite, or
+-- a low-gravity surface) → "Return to Earth" → parachute splashdown → rescue-boat pickup.
+-- Only ONE mission runs at a time. The flow self-resets if a crew member dies or leaves.
+--
+-- Standard rocket: assembled at the VAB, rolled out to the pad, solo, uses the flight
+-- plan's destination. Artemis: on its own pad, unlocked only in a free private server
+-- with 2+ players, carries up to 4 to the Moon together.
 
 local Lighting = game:GetService("Lighting")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
@@ -33,13 +36,38 @@ local rollingOut = false
 local rocketAtPad = false
 local canReturn = false
 local awaitingRescue = false
-local flyingPlayer: Player? = nil
+local crew: { Player } = {}
+local missionModel: Model? = nil
+local missionEngineFX: BasePart? = nil
+local missionResetCF: CFrame? = nil
+local missionDest = "EarthOrbit"
 local savedLighting: { [string]: any }? = nil
-local abortConn: RBXScriptConnection? = nil
+local abortConns: { RBXScriptConnection } = {}
 local deployedSats: { { name: string, status: string } } = {}
 
 local function labelFor(dest: string): string
 	return DEST_LABEL[dest] or dest
+end
+
+local function humanoidOf(player: Player): Humanoid?
+	local character = player.Character
+	return character and character:FindFirstChildOfClass("Humanoid")
+end
+
+local function isCrew(player: Player): boolean
+	return table.find(crew, player) ~= nil
+end
+
+local function notifyCrew(message: string)
+	for _, p in crew do
+		notify:FireClient(p, message)
+	end
+end
+
+local function fadeCrew(action: string, duration: number)
+	for _, p in crew do
+		screen:FireClient(p, action, duration)
+	end
 end
 
 local function refreshMonitor()
@@ -57,8 +85,11 @@ local function refreshMonitor()
 	complex.MonitorLabel.Text = `In orbit: {#deployedSats}\n\n` .. table.concat(lines, "\n")
 end
 
-local function setEngine(on: boolean)
-	for _, d in complex.EngineFX:GetChildren() do
+local function setEngine(fx: BasePart?, on: boolean)
+	if not fx then
+		return
+	end
+	for _, d in fx:GetChildren() do
 		if d:IsA("ParticleEmitter") or d:IsA("PointLight") then
 			(d :: any).Enabled = on
 		end
@@ -106,10 +137,11 @@ local function restoreLighting()
 	savedLighting = nil
 end
 
-local function resetRocket()
-	setEngine(false)
-	complex.Rocket:PivotTo(complex.RocketVAB)
-	rocketAtPad = false
+local function resetMissionVehicle()
+	setEngine(missionEngineFX, false)
+	if missionModel and missionResetCF then
+		missionModel:PivotTo(missionResetCF)
+	end
 end
 
 local function resetDescent()
@@ -118,28 +150,144 @@ local function resetDescent()
 end
 
 local function endFlight()
-	if abortConn then
-		abortConn:Disconnect()
-		abortConn = nil
+	for _, c in abortConns do
+		c:Disconnect()
 	end
+	abortConns = {}
 	restoreLighting()
 	Workspace.Gravity = Config.Gravity.Earth
-	resetRocket()
+	setEngine(complex.EngineFX, false)
+	setEngine(complex.ArtemisEngineFX, false)
+	complex.Rocket:PivotTo(complex.RocketVAB)
 	complex.Crawler:PivotTo(complex.CrawlerVAB)
+	complex.Artemis:PivotTo(complex.ArtemisStart)
 	resetDescent()
 	inFlight = false
 	canReturn = false
 	awaitingRescue = false
-	flyingPlayer = nil
+	rocketAtPad = false
+	crew = {}
+	missionModel = nil
+	missionEngineFX = nil
+	missionResetCF = nil
 end
 
-local function fade(player: Player, action: string, duration: number)
-	screen:FireClient(player, action, duration)
+local function connectAborts()
+	for _, p in crew do
+		table.insert(abortConns, p.CharacterRemoving:Connect(endFlight))
+	end
 end
 
-local function humanoidOf(player: Player): Humanoid?
-	local character = player.Character
-	return character and character:FindFirstChildOfClass("Humanoid")
+local function placeCrewSurface()
+	for _, p in crew do
+		local hum = humanoidOf(p)
+		if hum then
+			hum.Sit = false
+		end
+	end
+	task.wait(0.15)
+	for i, p in crew do
+		if p.Character then
+			p.Character:PivotTo(complex.SurfaceSpawn * CFrame.new((i - 1) * 5, 0, 0))
+		end
+	end
+end
+
+local function placeCrewOrbit()
+	for i, p in crew do
+		local hum = humanoidOf(p)
+		if not hum then
+			continue
+		end
+		if i == 1 then
+			complex.OrbitSeat:Sit(hum)
+		else
+			hum.Sit = false
+			if p.Character then
+				p.Character:PivotTo(complex.OrbitDeck.CFrame * CFrame.new((i - 2) * 4 - 2, 4, 0))
+			end
+		end
+	end
+end
+
+local function runMission()
+	task.spawn(function()
+		for n = Config.Launch.CountdownFrom, 1, -1 do
+			if not inFlight then
+				return
+			end
+			notifyCrew(`T-minus {n}...`)
+			task.wait(1)
+		end
+		if not inFlight then
+			return
+		end
+
+		notifyCrew("🔥 Liftoff!")
+		setEngine(missionEngineFX, true)
+		for _, p in crew do
+			launchFX:FireClient(p, Config.Launch.AscentSeconds)
+		end
+
+		local model = missionModel :: Model
+		local start = model:GetPivot()
+		local dur = Config.Launch.AscentSeconds
+		local height = Config.Launch.AscentHeight
+		local t = 0
+		while t < dur do
+			local dt = task.wait()
+			t += dt
+			if not inFlight then
+				return
+			end
+			local f = math.clamp(t / dur, 0, 1)
+			model:PivotTo(start + Vector3.new(0, height * f * f, 0))
+		end
+
+		notifyCrew(`🛰️ Stage separation — on course for {labelFor(missionDest)}.`)
+		task.wait(1)
+		if not inFlight then
+			return
+		end
+
+		fadeCrew("out", Config.Launch.FadeSeconds)
+		task.wait(Config.Launch.FadeSeconds + 0.1)
+		setSpaceLighting()
+
+		if missionDest == "Moon" or missionDest == "Mars" then
+			Workspace.Gravity = Config.Gravity[missionDest] or Config.Gravity.Moon
+			complex.SurfaceGround.Color = if missionDest == "Mars" then MARS_GROUND else MOON_GROUND
+			placeCrewSurface()
+			resetMissionVehicle()
+			fadeCrew("in", 0.9)
+			task.wait(0.3)
+			notifyCrew(`🛬 Touchdown on {labelFor(missionDest)}! Explore — return via the ascent stage.`)
+			canReturn = true
+		else
+			placeCrewOrbit()
+			task.wait(0.1)
+			resetMissionVehicle()
+			fadeCrew("in", 0.8)
+			task.wait(0.8)
+			notifyCrew("🌍 Orbit achieved! Deploying satellite...")
+
+			local idx = #deployedSats + 1
+			local name = string.format("SAT-%02d", idx)
+			local sat = WorldBuilder.makeSatellite(Config.Orbit.Center + Vector3.new(18, 2 + idx * 3, 0))
+			local from = sat:GetPivot()
+			local st = 0
+			while st < 2.5 do
+				local dt = task.wait()
+				st += dt
+				sat:PivotTo(from + Vector3.new(math.min(st, 2.5) * 8, 0, math.sin(st * 2) * 4))
+			end
+
+			table.insert(deployedSats, { name = name, status = "Nominal" })
+			refreshMonitor()
+			notifyCrew(`🛰️ {name} deployed and nominal — track it at Mission Control.`)
+			canReturn = true
+		end
+	end)
 end
 
 function LaunchSystem.isBusy(): boolean
@@ -181,7 +329,6 @@ function LaunchSystem.beginRollout(player: Player)
 		rollingOut = false
 		notify:FireClient(player, "🚀 Rocket's on the pad! Suit up and board.")
 
-		-- Crawler retreats to the VAB.
 		local rdur = Config.Rocket.RolloutReturnSeconds
 		local rt = 0
 		while rt < rdur do
@@ -193,6 +340,7 @@ function LaunchSystem.beginRollout(player: Player)
 	end)
 end
 
+-- Standard rocket: solo crew of 1, uses the flight-plan destination.
 function LaunchSystem.beginCountdown(player: Player)
 	if inFlight then
 		notify:FireClient(player, "A launch is already in progress — stand by.")
@@ -201,156 +349,98 @@ function LaunchSystem.beginCountdown(player: Player)
 	if not humanoidOf(player) then
 		return
 	end
-
-	local dest = complex.FlightConsole:GetAttribute("Dest") or "EarthOrbit"
+	crew = { player }
+	missionModel = complex.Rocket
+	missionEngineFX = complex.EngineFX
+	missionResetCF = complex.RocketVAB
+	missionDest = complex.FlightConsole:GetAttribute("Dest") or "EarthOrbit"
 	inFlight = true
-	flyingPlayer = player
-	abortConn = player.CharacterRemoving:Connect(endFlight)
-
-	task.spawn(function()
-		for n = Config.Launch.CountdownFrom, 1, -1 do
-			if not inFlight then
-				return
-			end
-			notify:FireClient(player, `T-minus {n}...`)
-			task.wait(1)
-		end
-		if not inFlight then
-			return
-		end
-
-		notify:FireClient(player, "🔥 Liftoff!")
-		setEngine(true)
-		launchFX:FireClient(player, Config.Launch.AscentSeconds)
-
-		local start = complex.Rocket:GetPivot()
-		local dur = Config.Launch.AscentSeconds
-		local height = Config.Launch.AscentHeight
-		local t = 0
-		while t < dur do
-			local dt = task.wait()
-			t += dt
-			if not inFlight then
-				return
-			end
-			local f = math.clamp(t / dur, 0, 1)
-			complex.Rocket:PivotTo(start + Vector3.new(0, height * f * f, 0))
-		end
-
-		notify:FireClient(player, `🛰️ Stage separation — on course for {labelFor(dest)}.`)
-		task.wait(1)
-		if not inFlight then
-			return
-		end
-
-		fade(player, "out", Config.Launch.FadeSeconds)
-		task.wait(Config.Launch.FadeSeconds + 0.1)
-		setSpaceLighting()
-
-		if dest == "Moon" or dest == "Mars" then
-			Workspace.Gravity = Config.Gravity[dest] or Config.Gravity.Moon
-			complex.SurfaceGround.Color = if dest == "Mars" then MARS_GROUND else MOON_GROUND
-
-			local hum = humanoidOf(player)
-			if hum then
-				hum.Sit = false
-			end
-			task.wait(0.15)
-			if player.Character then
-				player.Character:PivotTo(complex.SurfaceSpawn)
-			end
-			resetRocket()
-
-			fade(player, "in", 0.9)
-			task.wait(0.3)
-			notify:FireClient(player, `🛬 Touchdown on {labelFor(dest)}! Walk up to your rover and drive — return via the ascent stage.`)
-			canReturn = true
-		else
-			local hum = humanoidOf(player)
-			if hum then
-				complex.OrbitSeat:Sit(hum)
-			end
-			task.wait(0.1)
-			resetRocket()
-
-			fade(player, "in", 0.8)
-			task.wait(0.8)
-			notify:FireClient(player, "🌍 Orbit achieved! Deploying satellite...")
-
-			local idx = #deployedSats + 1
-			local name = string.format("SAT-%02d", idx)
-			local sat = WorldBuilder.makeSatellite(Config.Orbit.Center + Vector3.new(18, 2 + idx * 3, 0))
-			local from = sat:GetPivot()
-			local st = 0
-			while st < 2.5 do
-				local dt = task.wait()
-				st += dt
-				sat:PivotTo(from + Vector3.new(math.min(st, 2.5) * 8, 0, math.sin(st * 2) * 4))
-			end
-
-			table.insert(deployedSats, { name = name, status = "Nominal" })
-			refreshMonitor()
-			notify:FireClient(player, `🛰️ {name} deployed and nominal — track it at Mission Control.`)
-			canReturn = true
-		end
-	end)
+	connectAborts()
+	runMission()
 end
 
 local function onReturn(player: Player)
-	if player ~= flyingPlayer or not canReturn then
+	if not isCrew(player) or not canReturn then
 		return
 	end
 	canReturn = false
 
 	task.spawn(function()
-		fade(player, "out", 0.7)
+		fadeCrew("out", 0.7)
 		task.wait(0.8)
 		restoreLighting()
 		Workspace.Gravity = Config.Gravity.Earth
-
 		complex.DescentRig:PivotTo(complex.DescentStart)
 		setParachute(true)
-		local hum = humanoidOf(player)
-		if hum then
-			hum.Sit = false
-			task.wait(0.05)
-			complex.DescentSeat:Sit(hum)
-		end
-
-		fade(player, "in", 0.8)
-		notify:FireClient(player, "🔥 Re-entry! Parachute deployed — splashing down.")
 
 		local sx = Config.Splashdown.Point.X
 		local sz = Config.Splashdown.Point.Z
-		local startY = Config.Splashdown.StartHeight
-		local dur = Config.Splashdown.DescentSeconds
-		local t = 0
-		while t < dur do
-			local dt = task.wait()
-			t += dt
-			if not inFlight then
-				return
+
+		if #crew <= 1 then
+			-- Solo: ride the parachute down.
+			local hum = humanoidOf(crew[1])
+			if hum then
+				hum.Sit = false
+				task.wait(0.05)
+				complex.DescentSeat:Sit(hum)
 			end
-			local f = math.clamp(t / dur, 0, 1)
-			local y = startY + (2 - startY) * f
-			local sway = math.sin(t * 1.4) * 7 * (1 - f)
-			complex.DescentRig:PivotTo(CFrame.new(sx + sway, y, sz))
+			fadeCrew("in", 0.8)
+			notifyCrew("🔥 Re-entry! Parachute deployed — splashing down.")
+			local startY = Config.Splashdown.StartHeight
+			local dur = Config.Splashdown.DescentSeconds
+			local t = 0
+			while t < dur do
+				local dt = task.wait()
+				t += dt
+				if not inFlight then
+					return
+				end
+				local f = math.clamp(t / dur, 0, 1)
+				local y = startY + (2 - startY) * f
+				local sway = math.sin(t * 1.4) * 7 * (1 - f)
+				complex.DescentRig:PivotTo(CFrame.new(sx + sway, y, sz))
+			end
+		else
+			-- Crew: set down together at the splashdown point.
+			notifyCrew("🔥 Re-entry — splashing down!")
+			complex.DescentRig:PivotTo(CFrame.new(sx, 2, sz))
+			for i, p in crew do
+				local hum = humanoidOf(p)
+				if not hum then
+					continue
+				end
+				if i == 1 then
+					complex.DescentSeat:Sit(hum)
+				else
+					hum.Sit = false
+					if p.Character then
+						p.Character:PivotTo(CFrame.new(sx + (i - 2) * 4 - 2, 4, sz + 6))
+					end
+				end
+			end
+			task.wait(1)
+			fadeCrew("in", 0.9)
 		end
 
 		setParachute(false)
-		notify:FireClient(player, "🌊 Splashdown! You're floating safely — call for pickup.")
+		notifyCrew("🌊 Splashdown! You're floating safely — call for pickup.")
 		awaitingRescue = true
-		rescuePrompt:FireClient(player, true)
+		for _, p in crew do
+			rescuePrompt:FireClient(p, true)
+		end
 	end)
 end
 
 function LaunchSystem.requestRescue(player: Player)
-	if player ~= flyingPlayer or not awaitingRescue then
+	if not isCrew(player) or not awaitingRescue then
 		return
 	end
 	awaitingRescue = false
-	rescuePrompt:FireClient(player, false)
-	notify:FireClient(player, "🚤 Rescue boats dispatched!")
+	local members = table.clone(crew)
+	for _, p in members do
+		rescuePrompt:FireClient(p, false)
+	end
+	notifyCrew("🚤 Rescue boats dispatched!")
 
 	task.spawn(function()
 		local target = complex.DescentRig:GetPivot().Position
@@ -369,15 +459,21 @@ function LaunchSystem.requestRescue(player: Player)
 			boat:PivotTo(from:Lerp(to, math.clamp(t / dur, 0, 1)))
 		end
 
-		notify:FireClient(player, "🪝 Pulling you aboard...")
+		notifyCrew("🪝 Pulling you aboard...")
 		task.wait(1.2)
-		fade(player, "out", 0.6)
+		for _, p in members do
+			screen:FireClient(p, "out", 0.6)
+		end
 		task.wait(0.7)
-		player:LoadCharacter()
+		for _, p in members do
+			p:LoadCharacter()
+		end
 		boat:Destroy()
 		endFlight()
-		fade(player, "in", 0.8)
-		notify:FireClient(player, "✅ Rescued! Welcome back to the Cape.")
+		for _, p in members do
+			screen:FireClient(p, "in", 0.8)
+			notify:FireClient(p, "✅ Rescued! Welcome back to the Cape.")
+		end
 	end)
 end
 
@@ -400,8 +496,80 @@ local function onDrive(player: Player)
 	if not hrp then
 		return
 	end
-	-- Lift the player onto the seat; the VehicleSeat grabs them on contact.
 	hrp.CFrame = complex.RoverSeat.CFrame * CFrame.new(0, 2, 0)
+end
+
+local function artemisUnlocked(): boolean
+	return game.PrivateServerOwnerId ~= 0 and #Players:GetPlayers() >= 2
+end
+
+local function updateArtemisSign()
+	if not complex then
+		return
+	end
+	complex.ArtemisSign.Text = if artemisUnlocked()
+		then "🚀 ARTEMIS — crew of 4 — board & LAUNCH!"
+		else "🔒 ARTEMIS — needs a free private server (2+ players)"
+end
+
+local function onArtemisBoard(player: Player)
+	if inFlight then
+		notify:FireClient(player, "🚀 A mission is underway — stand by.")
+		return
+	end
+	if not artemisUnlocked() then
+		notify:FireClient(player, "🔒 Artemis unlocks in a FREE private server with 2+ players.")
+		return
+	end
+	if not player:GetAttribute("HasSuit") then
+		notify:FireClient(player, "🚫 Suit up before boarding Artemis.")
+		return
+	end
+	local hum = humanoidOf(player)
+	if not hum then
+		return
+	end
+	for _, s in complex.ArtemisSeats do
+		if not s.Occupant then
+			s:Sit(hum)
+			notify:FireClient(player, "🧑‍🚀 Boarded Artemis. When the crew's ready, hold LAUNCH (G) up top.")
+			return
+		end
+	end
+	notify:FireClient(player, "Artemis is full (4 crew).")
+end
+
+local function onArtemisLaunch(player: Player)
+	if inFlight then
+		notify:FireClient(player, "🚀 A mission is already underway.")
+		return
+	end
+	if not artemisUnlocked() then
+		notify:FireClient(player, "🔒 Artemis is locked.")
+		return
+	end
+	local gathered: { Player } = {}
+	for _, s in complex.ArtemisSeats do
+		local occupant = s.Occupant
+		if occupant then
+			local p = Players:GetPlayerFromCharacter(occupant.Parent)
+			if p then
+				table.insert(gathered, p)
+			end
+		end
+	end
+	if #gathered == 0 then
+		notify:FireClient(player, "No crew aboard Artemis yet — board first (E).")
+		return
+	end
+	crew = gathered
+	missionModel = complex.Artemis
+	missionEngineFX = complex.ArtemisEngineFX
+	missionResetCF = complex.ArtemisStart
+	missionDest = "Moon" -- Artemis is the crewed Moon mission
+	inFlight = true
+	connectAborts()
+	runMission()
 end
 
 function LaunchSystem.start(complexRef: any)
@@ -413,11 +581,16 @@ function LaunchSystem.start(complexRef: any)
 	complex.RolloutPrompt.Triggered:Connect(function(player: Player)
 		LaunchSystem.beginRollout(player)
 	end)
+	complex.ArtemisBoardPrompt.Triggered:Connect(onArtemisBoard)
+	complex.ArtemisLaunchPrompt.Triggered:Connect(onArtemisLaunch)
 
 	rescue.OnServerEvent:Connect(function(player: Player)
 		LaunchSystem.requestRescue(player)
 	end)
 
+	Players.PlayerAdded:Connect(updateArtemisSign)
+	Players.PlayerRemoving:Connect(updateArtemisSign)
+	updateArtemisSign()
 	refreshMonitor()
 
 	-- Kinematic rover driving while a player occupies the seat.
