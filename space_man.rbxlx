@@ -689,6 +689,10 @@ local function onDrive(player: Player)
 end
 
 local function artemisUnlocked(): boolean
+	-- Always available in Studio so you can test it (solo or with local test players).
+	if RunService:IsStudio() then
+		return true
+	end
 	return game.PrivateServerOwnerId ~= 0 and #Players:GetPlayers() >= 2
 end
 
