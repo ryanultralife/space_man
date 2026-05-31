@@ -6,6 +6,9 @@
 *.rbxm
 *.rbxmx
 
+# ...except the playable place we ship with the repo
+!space_man.rbxlx
+
 # Toolchain binaries (rokit / aftman installs)
 /bin/
 

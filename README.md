@@ -31,16 +31,23 @@ syncs live into Roblox Studio.
 - **Rover payload**: the rover rides in the rocket's (semi-transparent) fairing, then
   **deploys on the Moon/Mars surface** — walk up and **drive it** in low gravity around
   a small surface base. Head to the ascent stage to splash down home.
+- **Crawler rollout**: assemble at the VAB and a **crawler-transporter rolls the rocket
+  out to the pad** (~30s) before you can board.
+- **Mission Control monitor**: a screen on the MC building tracks every satellite you've
+  deployed in orbit.
 - On-screen toast notifications, screen fades, and a small action button (client HUD).
 
 ## Roadmap
 
 1. ✅ Launch complex + suit-up gate + boarding gate
-2. Rocket assembly + **30s crawler rollout** from the VAB to the pad
+2. ✅ Rocket assembly + **30s crawler rollout** from the VAB to the pad
 3. ✅ Launch & ascent → **orbit** with satellite deployment + return
-4. **Mission Control** satellite-monitoring screen
+4. ✅ **Mission Control** satellite-monitoring screen
 5. ✅ Re-entry + **splashdown**: float under parachute, small "Activate Rescue Boats" pickup
 6. ✅ New worlds: **Moon & Mars** (low gravity), a drivable rover payload, surface base
+
+**🎉 All six milestones are in!** Next-up ideas: polish (textures, a starfield skybox,
+sounds), and splitting each world into its own Roblox place for true multiplayer.
 
 > Note: while a player is in orbit the whole place switches to a starry "space"
 > lighting (it's global for now). Multiplayer worlds will move to separate Roblox
@@ -69,7 +76,13 @@ src/
 Gravity is applied per-world from `Config.Gravity` at runtime (Earth ≈ 196.2; Moon and
 Mars are lower).
 
-## Getting started
+## Play it now (no setup)
+
+Open **`space_man.rbxlx`** in Roblox Studio (**File → Open from File…**, or just
+double-click the file) and press **Play ▶️**. That place file has the entire game
+baked in — code and all.
+
+## Developing with live sync
 
 1. **Install the toolchain** (Rojo is already installed globally; this pins it per-project):
    ```sh

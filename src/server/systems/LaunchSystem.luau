@@ -1,9 +1,9 @@
 --!strict
--- Orchestrates a full mission. The flight-plan console picks a destination:
---   * Earth Orbit  → orbit scene + satellite deploy
+-- Orchestrates a full mission. The rocket is assembled at the VAB and must be
+-- rolled out to the pad first. The flight-plan console picks a destination:
+--   * Earth Orbit  → orbit scene + satellite deploy (tracked at Mission Control)
 --   * Moon / Mars  → low-gravity surface, deploy + drive the rover
--- Either way: countdown → ignition → ascent → arrival, and "Return to Earth"
--- brings you home via a parachute splashdown + rescue-boat pickup.
+-- "Return to Earth" brings you home via a parachute splashdown + rescue-boat pickup.
 -- One astronaut flies at a time; the flow self-resets if they die or leave.
 
 local Lighting = game:GetService("Lighting")
@@ -29,14 +29,32 @@ local MARS_GROUND = Color3.fromRGB(170, 92, 58)
 
 local complex: any = nil
 local inFlight = false
+local rollingOut = false
+local rocketAtPad = false
 local canReturn = false
 local awaitingRescue = false
 local flyingPlayer: Player? = nil
 local savedLighting: { [string]: any }? = nil
 local abortConn: RBXScriptConnection? = nil
+local deployedSats: { { name: string, status: string } } = {}
 
-local function label(dest: string): string
+local function labelFor(dest: string): string
 	return DEST_LABEL[dest] or dest
+end
+
+local function refreshMonitor()
+	if not complex then
+		return
+	end
+	if #deployedSats == 0 then
+		complex.MonitorLabel.Text = "No satellites deployed yet.\n\nFly an Earth Orbit mission\nto deploy one."
+		return
+	end
+	local lines = {}
+	for _, s in deployedSats do
+		table.insert(lines, `{s.name}   [ ● {s.status} ]`)
+	end
+	complex.MonitorLabel.Text = `In orbit: {#deployedSats}\n\n` .. table.concat(lines, "\n")
 end
 
 local function setEngine(on: boolean)
@@ -90,7 +108,8 @@ end
 
 local function resetRocket()
 	setEngine(false)
-	complex.Rocket:PivotTo(complex.RocketStart)
+	complex.Rocket:PivotTo(complex.RocketVAB)
+	rocketAtPad = false
 end
 
 local function resetDescent()
@@ -106,6 +125,7 @@ local function endFlight()
 	restoreLighting()
 	Workspace.Gravity = Config.Gravity.Earth
 	resetRocket()
+	complex.Crawler:PivotTo(complex.CrawlerVAB)
 	resetDescent()
 	inFlight = false
 	canReturn = false
@@ -123,7 +143,54 @@ local function humanoidOf(player: Player): Humanoid?
 end
 
 function LaunchSystem.isBusy(): boolean
-	return inFlight
+	return inFlight or rollingOut
+end
+
+function LaunchSystem.isReady(): boolean
+	return rocketAtPad and not inFlight and not rollingOut
+end
+
+function LaunchSystem.beginRollout(player: Player)
+	if inFlight or rollingOut then
+		notify:FireClient(player, "🚜 Hold on — something's already moving.")
+		return
+	end
+	if rocketAtPad then
+		notify:FireClient(player, "The rocket is already on the pad — suit up and board!")
+		return
+	end
+	rollingOut = true
+	notify:FireClient(player, `🚜 Assembling and rolling the rocket out to the pad (~{Config.Rocket.RolloutSeconds}s)...`)
+
+	task.spawn(function()
+		complex.Crawler:PivotTo(complex.CrawlerVAB)
+		local rFrom, rTo = complex.RocketVAB, complex.RocketStart
+		local cFrom, cTo = complex.CrawlerVAB, complex.CrawlerPad
+		local dur = Config.Rocket.RolloutSeconds
+		local t = 0
+		while t < dur do
+			local dt = task.wait()
+			t += dt
+			local f = math.clamp(t / dur, 0, 1)
+			complex.Rocket:PivotTo(rFrom:Lerp(rTo, f))
+			complex.Crawler:PivotTo(cFrom:Lerp(cTo, f))
+		end
+		complex.Rocket:PivotTo(rTo)
+		complex.Crawler:PivotTo(cTo)
+		rocketAtPad = true
+		rollingOut = false
+		notify:FireClient(player, "🚀 Rocket's on the pad! Suit up and board.")
+
+		-- Crawler retreats to the VAB.
+		local rdur = Config.Rocket.RolloutReturnSeconds
+		local rt = 0
+		while rt < rdur do
+			local dt = task.wait()
+			rt += dt
+			complex.Crawler:PivotTo(cTo:Lerp(cFrom, math.clamp(rt / rdur, 0, 1)))
+		end
+		complex.Crawler:PivotTo(cFrom)
+	end)
 end
 
 function LaunchSystem.beginCountdown(player: Player)
@@ -170,7 +237,7 @@ function LaunchSystem.beginCountdown(player: Player)
 			complex.Rocket:PivotTo(start + Vector3.new(0, height * f * f, 0))
 		end
 
-		notify:FireClient(player, `🛰️ Stage separation — on course for {label(dest)}.`)
+		notify:FireClient(player, `🛰️ Stage separation — on course for {labelFor(dest)}.`)
 		task.wait(1)
 		if not inFlight then
 			return
@@ -181,7 +248,6 @@ function LaunchSystem.beginCountdown(player: Player)
 		setSpaceLighting()
 
 		if dest == "Moon" or dest == "Mars" then
-			-- Land on the surface and deploy the rover.
 			Workspace.Gravity = Config.Gravity[dest] or Config.Gravity.Moon
 			complex.SurfaceGround.Color = if dest == "Mars" then MARS_GROUND else MOON_GROUND
 
@@ -197,10 +263,9 @@ function LaunchSystem.beginCountdown(player: Player)
 
 			fade(player, "in", 0.9)
 			task.wait(0.3)
-			notify:FireClient(player, `🛬 Touchdown on {label(dest)}! Walk up to your rover and drive — return via the ascent stage.`)
+			notify:FireClient(player, `🛬 Touchdown on {labelFor(dest)}! Walk up to your rover and drive — return via the ascent stage.`)
 			canReturn = true
 		else
-			-- Earth orbit + satellite deploy.
 			local hum = humanoidOf(player)
 			if hum then
 				complex.OrbitSeat:Sit(hum)
@@ -212,16 +277,20 @@ function LaunchSystem.beginCountdown(player: Player)
 			task.wait(0.8)
 			notify:FireClient(player, "🌍 Orbit achieved! Deploying satellite...")
 
-			local sat = complex.Satellite
+			local idx = #deployedSats + 1
+			local name = string.format("SAT-%02d", idx)
+			local sat = WorldBuilder.makeSatellite(Config.Orbit.Center + Vector3.new(18, 2 + idx * 3, 0))
 			local from = sat:GetPivot()
 			local st = 0
-			while st < 3 do
+			while st < 2.5 do
 				local dt = task.wait()
 				st += dt
-				sat:PivotTo(from + Vector3.new(math.min(st, 3) * 6, 0, 0))
+				sat:PivotTo(from + Vector3.new(math.min(st, 2.5) * 8, 0, math.sin(st * 2) * 4))
 			end
 
-			notify:FireClient(player, "🛰️ Satellite deployed. Use the capsule's prompt to head home.")
+			table.insert(deployedSats, { name = name, status = "Nominal" })
+			refreshMonitor()
+			notify:FireClient(player, `🛰️ {name} deployed and nominal — track it at Mission Control.`)
 			canReturn = true
 		end
 	end)
@@ -313,7 +382,7 @@ function LaunchSystem.requestRescue(player: Player)
 end
 
 local function onCycleDestination(player: Player)
-	if inFlight then
+	if inFlight or rollingOut then
 		notify:FireClient(player, "Can't change the flight plan mid-mission.")
 		return
 	end
@@ -321,8 +390,8 @@ local function onCycleDestination(player: Player)
 	local idx = table.find(Config.Destinations, cur) or 1
 	local nextDest = Config.Destinations[(idx % #Config.Destinations) + 1]
 	complex.FlightConsole:SetAttribute("Dest", nextDest)
-	complex.FlightLabel.Text = "Destination: " .. label(nextDest)
-	notify:FireClient(player, "🧭 Destination set: " .. label(nextDest))
+	complex.FlightLabel.Text = "Destination: " .. labelFor(nextDest)
+	notify:FireClient(player, "🧭 Destination set: " .. labelFor(nextDest))
 end
 
 local function onDrive(player: Player)
@@ -341,10 +410,15 @@ function LaunchSystem.start(complexRef: any)
 	complex.SurfaceReturnPrompt.Triggered:Connect(onReturn)
 	complex.FlightCyclePrompt.Triggered:Connect(onCycleDestination)
 	complex.RoverDrivePrompt.Triggered:Connect(onDrive)
+	complex.RolloutPrompt.Triggered:Connect(function(player: Player)
+		LaunchSystem.beginRollout(player)
+	end)
 
 	rescue.OnServerEvent:Connect(function(player: Player)
 		LaunchSystem.requestRescue(player)
 	end)
+
+	refreshMonitor()
 
 	-- Kinematic rover driving while a player occupies the seat.
 	RunService.Heartbeat:Connect(function(dt: number)

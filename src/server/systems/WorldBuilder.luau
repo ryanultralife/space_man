@@ -37,6 +37,12 @@ export type Complex = {
 	FlightConsole: BasePart,
 	FlightLabel: TextLabel,
 	FlightCyclePrompt: ProximityPrompt,
+	Crawler: Model,
+	RocketVAB: CFrame,
+	CrawlerVAB: CFrame,
+	CrawlerPad: CFrame,
+	RolloutPrompt: ProximityPrompt,
+	MonitorLabel: TextLabel,
 }
 
 local CONCRETE = Color3.fromRGB(150, 150, 158)
@@ -311,39 +317,8 @@ local function buildOrbitScene(parent: Instance, center: Vector3): (Seat, Proxim
 	returnPrompt.MaxActivationDistance = 18
 	returnPrompt.Parent = capsulePart
 
-	-- Satellite to deploy
-	local satellite = Instance.new("Model")
-	satellite.Name = "Satellite"
-	local satPos = Vector3.new(cx + 26, cy + 5, cz)
-	local satBody = part(satellite, {
-		Name = "Body",
-		Size = Vector3.new(3, 3, 4),
-		Position = satPos,
-		Color = Color3.fromRGB(188, 194, 205),
-		Material = Enum.Material.Metal,
-	})
-	part(satellite, {
-		Name = "Panel",
-		Size = Vector3.new(10, 0.2, 4),
-		Position = satPos + Vector3.new(6.5, 0, 0),
-		Color = Color3.fromRGB(40, 60, 120),
-	})
-	part(satellite, {
-		Name = "Panel",
-		Size = Vector3.new(10, 0.2, 4),
-		Position = satPos - Vector3.new(6.5, 0, 0),
-		Color = Color3.fromRGB(40, 60, 120),
-	})
-	vcyl(satellite, "Mast", satPos.X, satPos.Z, satPos.Y + 3.2, 3, 0.4, GREY)
-	part(satellite, {
-		Name = "Dish",
-		Shape = Enum.PartType.Ball,
-		Size = Vector3.new(2.4, 2.4, 2.4),
-		Position = satPos + Vector3.new(0, 4.6, 0),
-		Color = Color3.fromRGB(220, 222, 228),
-	})
-	satellite.PrimaryPart = satBody
-	satellite.Parent = parent
+	-- Pre-placed satellite (scenery); player-deployed ones are spawned at runtime.
+	local satellite = WorldBuilder.makeSatellite(Vector3.new(cx + 26, cy + 5, cz))
 
 	return orbitSeat, returnPrompt, satellite
 end
@@ -562,6 +537,65 @@ local function buildSurface(parent: Instance, center: Vector3): (BasePart, CFram
 	return ground, spawnCF, rover, roverSeat, drivePrompt, returnPrompt
 end
 
+function WorldBuilder.makeSatellite(position: Vector3): Model
+	local satellite = Instance.new("Model")
+	satellite.Name = "Satellite"
+	local satBody = part(satellite, {
+		Name = "Body",
+		Size = Vector3.new(3, 3, 4),
+		Position = position,
+		Color = Color3.fromRGB(188, 194, 205),
+		Material = Enum.Material.Metal,
+	})
+	part(satellite, {
+		Name = "Panel",
+		Size = Vector3.new(10, 0.2, 4),
+		Position = position + Vector3.new(6.5, 0, 0),
+		Color = Color3.fromRGB(40, 60, 120),
+	})
+	part(satellite, {
+		Name = "Panel",
+		Size = Vector3.new(10, 0.2, 4),
+		Position = position - Vector3.new(6.5, 0, 0),
+		Color = Color3.fromRGB(40, 60, 120),
+	})
+	vcyl(satellite, "Mast", position.X, position.Z, position.Y + 3.2, 3, 0.4, GREY)
+	part(satellite, {
+		Name = "Dish",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(2.4, 2.4, 2.4),
+		Position = position + Vector3.new(0, 4.6, 0),
+		Color = Color3.fromRGB(220, 222, 228),
+	})
+	satellite.PrimaryPart = satBody
+	satellite.Parent = Workspace
+	return satellite
+end
+
+local function buildCrawler(parent: Instance, pos: Vector3): Model
+	local crawler = Instance.new("Model")
+	crawler.Name = "Crawler"
+	local deck = part(crawler, {
+		Name = "Deck",
+		Size = Vector3.new(20, 1.2, 26),
+		Position = pos,
+		Color = Color3.fromRGB(70, 72, 80),
+		Material = Enum.Material.DiamondPlate,
+	})
+	for _, x in { -8, 8 } do
+		part(crawler, {
+			Name = "Tread",
+			Size = Vector3.new(3, 1.8, 26),
+			Position = pos + Vector3.new(x, -0.5, 0),
+			Color = Color3.fromRGB(34, 36, 42),
+			Material = Enum.Material.Metal,
+		})
+	end
+	crawler.PrimaryPart = deck
+	crawler.Parent = parent
+	return crawler
+end
+
 function WorldBuilder.makeBoat(position: Vector3): Model
 	local boat = Instance.new("Model")
 	boat.Name = "RescueBoat"
@@ -687,6 +721,14 @@ function WorldBuilder.build(): Complex
 	local rocket, seat, boardPrompt, engineFX = buildRocket(model, Vector3.new(padCenter.X, 1, padCenter.Z))
 	local orbitSeat, orbitReturnPrompt, satellite = buildOrbitScene(model, Config.Orbit.Center)
 
+	-- Park the rocket at the VAB on a crawler-transporter; it rolls out to the pad later.
+	local rocketPad = rocket:GetPivot()
+	local rocketVAB = rocketPad + Vector3.new(0, 0, 90)
+	rocket:PivotTo(rocketVAB)
+	local crawler = buildCrawler(model, Vector3.new(0, 0.6, 18))
+	local crawlerVAB = crawler:GetPivot()
+	local crawlerPad = crawlerVAB + Vector3.new(0, 0, -90)
+
 	-- Ocean east of the Cape (real terrain water for the splashdown).
 	Workspace.Terrain:FillBlock(CFrame.new(Config.Ocean.Center), Config.Ocean.Size, Enum.Material.Water)
 
@@ -738,11 +780,63 @@ function WorldBuilder.build(): Complex
 	flightCyclePrompt.MaxActivationDistance = 10
 	flightCyclePrompt.Parent = flightConsole
 
+	-- Rollout prompt on the VAB (assemble + roll the rocket to the pad).
+	local rolloutPrompt = Instance.new("ProximityPrompt")
+	rolloutPrompt.Name = "RolloutPrompt"
+	rolloutPrompt.ActionText = "Assemble & Roll Out Rocket"
+	rolloutPrompt.ObjectText = "Vehicle Assembly Building"
+	rolloutPrompt.HoldDuration = 0.5
+	rolloutPrompt.RequiresLineOfSight = false
+	rolloutPrompt.MaxActivationDistance = 20
+	rolloutPrompt.Parent = vab
+
+	-- Mission Control satellite-monitor screen (on the east face of the MC building).
+	local screenPart = part(model, {
+		Name = "MonitorScreen",
+		Size = Vector3.new(0.4, 7, 12),
+		Position = Vector3.new(-40.6, 8, 20),
+		Color = Color3.fromRGB(8, 10, 16),
+		Material = Enum.Material.SmoothPlastic,
+	})
+	local monitorGui = Instance.new("SurfaceGui")
+	monitorGui.Name = "Monitor"
+	monitorGui.Face = Enum.NormalId.Right
+	monitorGui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	monitorGui.PixelsPerStud = 50
+	monitorGui.Parent = screenPart
+
+	local monitorBg = Instance.new("Frame")
+	monitorBg.Size = UDim2.fromScale(1, 1)
+	monitorBg.BackgroundColor3 = Color3.fromRGB(8, 10, 16)
+	monitorBg.BorderSizePixel = 0
+	monitorBg.Parent = monitorGui
+
+	local monitorTitle = Instance.new("TextLabel")
+	monitorTitle.Size = UDim2.new(1, 0, 0, 64)
+	monitorTitle.BackgroundTransparency = 1
+	monitorTitle.Font = Enum.Font.GothamBold
+	monitorTitle.TextColor3 = Color3.fromRGB(120, 210, 255)
+	monitorTitle.TextScaled = true
+	monitorTitle.Text = "🛰️ SATELLITE MONITOR"
+	monitorTitle.Parent = monitorBg
+
+	local monitorLabel = Instance.new("TextLabel")
+	monitorLabel.Position = UDim2.new(0, 18, 0, 74)
+	monitorLabel.Size = UDim2.new(1, -36, 1, -86)
+	monitorLabel.BackgroundTransparency = 1
+	monitorLabel.Font = Enum.Font.Code
+	monitorLabel.TextColor3 = Color3.fromRGB(120, 255, 170)
+	monitorLabel.TextXAlignment = Enum.TextXAlignment.Left
+	monitorLabel.TextYAlignment = Enum.TextYAlignment.Top
+	monitorLabel.TextSize = 24
+	monitorLabel.Text = "Initializing..."
+	monitorLabel.Parent = monitorBg
+
 	return {
 		Model = model,
 		Rocket = rocket,
 		RocketSeat = seat,
-		RocketStart = rocket:GetPivot(),
+		RocketStart = rocketPad,
 		BoardPrompt = boardPrompt,
 		EngineFX = engineFX,
 		SuitStation = suitStation,
@@ -763,6 +857,12 @@ function WorldBuilder.build(): Complex
 		FlightConsole = flightConsole,
 		FlightLabel = flightLabel,
 		FlightCyclePrompt = flightCyclePrompt,
+		Crawler = crawler,
+		RocketVAB = rocketVAB,
+		CrawlerVAB = crawlerVAB,
+		CrawlerPad = crawlerPad,
+		RolloutPrompt = rolloutPrompt,
+		MonitorLabel = monitorLabel,
 	}
 end
 

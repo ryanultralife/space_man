@@ -25,6 +25,7 @@ Config.Suit = {
 Config.Rocket = {
 	-- Seconds for the crawler to roll the rocket from the assembly building to the pad.
 	RolloutSeconds = 30,
+	RolloutReturnSeconds = 8, -- crawler retreat back to the VAB afterwards
 	PromptDistance = 11,
 }
 

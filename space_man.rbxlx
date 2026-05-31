@@ -1,0 +1,1840 @@
+<roblox version="4">
+  <Item class="ReplicatedStorage" referent="0">
+    <Properties>
+      <string name="Name">ReplicatedStorage</string>
+    </Properties>
+    <Item class="Folder" referent="1">
+      <Properties>
+        <string name="Name">Shared</string>
+      </Properties>
+      <Item class="ModuleScript" referent="2">
+        <Properties>
+          <string name="Name">Config</string>
+          <string name="Source"><![CDATA[--!strict
+-- Central tunables for space_man. Edit values here; every system reads from this.
+
+local Config = {}
+
+-- Roblox gravity units (default Workspace.Gravity is 196.2 ≈ Earth's 9.81 m/s²).
+-- Other bodies are scaled by their real surface-gravity ratio to Earth.
+Config.Gravity = {
+	Earth = 196.2,
+	Moon = 32.4, -- ~1.62 / 9.81 * 196.2
+	Mars = 74.4, -- ~3.72 / 9.81 * 196.2
+	Orbit = 0, -- microgravity
+} :: { [string]: number }
+
+-- Which world this place currently represents.
+-- (Later milestone: split worlds into separate Roblox places and teleport between them.)
+Config.CurrentWorld = "Earth"
+
+Config.Suit = {
+	HelmetColor = Color3.fromRGB(235, 240, 245),
+	SuitColor = Color3.fromRGB(220, 224, 230),
+	PromptDistance = 9,
+}
+
+Config.Rocket = {
+	-- Seconds for the crawler to roll the rocket from the assembly building to the pad.
+	RolloutSeconds = 30,
+	RolloutReturnSeconds = 8, -- crawler retreat back to the VAB afterwards
+	PromptDistance = 11,
+}
+
+Config.Launch = {
+	CountdownFrom = 5,
+	AscentSeconds = 7,
+	AscentHeight = 260,
+	FadeSeconds = 0.7,
+}
+
+Config.Orbit = {
+	-- Where the orbit scene lives (far from the launch site; we relocate the player here).
+	Center = Vector3.new(0, 0, 6000),
+}
+
+Config.Splashdown = {
+	Point = Vector3.new(480, 0, -10), -- middle of the ocean, east of the Cape
+	StartHeight = 360, -- altitude the parachute descent begins from
+	FloatY = 1.5, -- where the capsule rests, half-submerged
+	DescentSeconds = 9,
+}
+
+Config.Rescue = {
+	ShoreX = 160, -- where rescue boats set off from
+	BoatSpeedSeconds = 5,
+}
+
+Config.Ocean = {
+	Center = Vector3.new(520, -20, -10),
+	Size = Vector3.new(760, 40, 520),
+}
+
+Config.Rover = {
+	Speed = 42,
+	TurnRate = 1.8,
+}
+
+Config.Surface = {
+	-- Reusable surface world (recoloured per destination), far from the launch site.
+	Center = Vector3.new(0, 0, 12000),
+}
+
+Config.Destinations = { "EarthOrbit", "Moon", "Mars" }
+
+return Config
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="3">
+        <Properties>
+          <string name="Name">Remotes</string>
+          <string name="Source"><![CDATA[--!strict
+-- Accessor for networking objects. The server creates them on demand;
+-- the client waits for them. Keeps remote wiring in one place.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local FOLDER_NAME = "Remotes"
+
+local Remotes = {}
+
+local function getFolder(): Folder
+	if RunService:IsServer() then
+		local folder = ReplicatedStorage:FindFirstChild(FOLDER_NAME)
+		if not folder then
+			folder = Instance.new("Folder")
+			folder.Name = FOLDER_NAME
+			folder.Parent = ReplicatedStorage
+		end
+		return folder :: Folder
+	end
+	return ReplicatedStorage:WaitForChild(FOLDER_NAME) :: Folder
+end
+
+function Remotes.event(name: string): RemoteEvent
+	local folder = getFolder()
+	if RunService:IsServer() then
+		local ev = folder:FindFirstChild(name)
+		if not ev then
+			ev = Instance.new("RemoteEvent")
+			ev.Name = name
+			ev.Parent = folder
+		end
+		return ev :: RemoteEvent
+	end
+	return folder:WaitForChild(name) :: RemoteEvent
+end
+
+return Remotes
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="ServerScriptService" referent="4">
+    <Properties>
+      <string name="Name">ServerScriptService</string>
+    </Properties>
+    <Item class="Script" referent="5">
+      <Properties>
+        <string name="Name">Server</string>
+        <token name="RunContext">0</token>
+        <string name="Source"><![CDATA[--!strict
+-- Server entry point. Sets world gravity, builds the world,
+-- and starts the gameplay systems.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+
+local WorldBuilder = require(script.systems.WorldBuilder)
+local SuitSystem = require(script.systems.SuitSystem)
+local LaunchSystem = require(script.systems.LaunchSystem)
+local RocketBoarding = require(script.systems.RocketBoarding)
+
+Workspace.Gravity = Config.Gravity[Config.CurrentWorld] or 196.2
+
+local complex = WorldBuilder.build()
+SuitSystem.start(complex)
+LaunchSystem.start(complex)
+RocketBoarding.start(complex, LaunchSystem)
+
+print(`[space_man] server ready — world: {Config.CurrentWorld}, gravity: {Workspace.Gravity}`)
+]]></string>
+      </Properties>
+      <Item class="Folder" referent="6">
+        <Properties>
+          <string name="Name">systems</string>
+        </Properties>
+        <Item class="ModuleScript" referent="7">
+          <Properties>
+            <string name="Name">LaunchSystem</string>
+            <string name="Source"><![CDATA[--!strict
+-- Orchestrates a full mission. The rocket is assembled at the VAB and must be
+-- rolled out to the pad first. The flight-plan console picks a destination:
+--   * Earth Orbit  → orbit scene + satellite deploy (tracked at Mission Control)
+--   * Moon / Mars  → low-gravity surface, deploy + drive the rover
+-- "Return to Earth" brings you home via a parachute splashdown + rescue-boat pickup.
+-- One astronaut flies at a time; the flow self-resets if they die or leave.
+
+local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local WorldBuilder = require(script.Parent.WorldBuilder)
+
+local LaunchSystem = {}
+
+local notify = Remotes.event("Notify")
+local launchFX = Remotes.event("Launch")
+local screen = Remotes.event("Screen")
+local rescuePrompt = Remotes.event("RescuePrompt")
+local rescue = Remotes.event("Rescue")
+
+local DEST_LABEL = { EarthOrbit = "Earth Orbit", Moon = "the Moon", Mars = "Mars" }
+local MOON_GROUND = Color3.fromRGB(150, 150, 156)
+local MARS_GROUND = Color3.fromRGB(170, 92, 58)
+
+local complex: any = nil
+local inFlight = false
+local rollingOut = false
+local rocketAtPad = false
+local canReturn = false
+local awaitingRescue = false
+local flyingPlayer: Player? = nil
+local savedLighting: { [string]: any }? = nil
+local abortConn: RBXScriptConnection? = nil
+local deployedSats: { { name: string, status: string } } = {}
+
+local function labelFor(dest: string): string
+	return DEST_LABEL[dest] or dest
+end
+
+local function refreshMonitor()
+	if not complex then
+		return
+	end
+	if #deployedSats == 0 then
+		complex.MonitorLabel.Text = "No satellites deployed yet.\n\nFly an Earth Orbit mission\nto deploy one."
+		return
+	end
+	local lines = {}
+	for _, s in deployedSats do
+		table.insert(lines, `{s.name}   [ ● {s.status} ]`)
+	end
+	complex.MonitorLabel.Text = `In orbit: {#deployedSats}\n\n` .. table.concat(lines, "\n")
+end
+
+local function setEngine(on: boolean)
+	for _, d in complex.EngineFX:GetChildren() do
+		if d:IsA("ParticleEmitter") or d:IsA("PointLight") then
+			(d :: any).Enabled = on
+		end
+	end
+end
+
+local function setParachute(show: boolean)
+	local chute = complex.DescentRig:FindFirstChild("Parachute")
+	if not chute then
+		return
+	end
+	for _, p in chute:GetDescendants() do
+		if p:IsA("BasePart") then
+			p.Transparency = if show then (p:GetAttribute("Vis") or 0) else 1
+		end
+	end
+end
+
+local function setSpaceLighting()
+	if savedLighting then
+		return
+	end
+	savedLighting = {
+		ClockTime = Lighting.ClockTime,
+		Brightness = Lighting.Brightness,
+		OutdoorAmbient = Lighting.OutdoorAmbient,
+		Ambient = Lighting.Ambient,
+		FogEnd = Lighting.FogEnd,
+	}
+	Lighting.ClockTime = 0
+	Lighting.Brightness = 1
+	Lighting.OutdoorAmbient = Color3.fromRGB(18, 18, 28)
+	Lighting.Ambient = Color3.fromRGB(12, 12, 22)
+	Lighting.FogEnd = 1e9
+end
+
+local function restoreLighting()
+	local s = savedLighting
+	if not s then
+		return
+	end
+	for k, v in s do
+		(Lighting :: any)[k] = v
+	end
+	savedLighting = nil
+end
+
+local function resetRocket()
+	setEngine(false)
+	complex.Rocket:PivotTo(complex.RocketVAB)
+	rocketAtPad = false
+end
+
+local function resetDescent()
+	complex.DescentRig:PivotTo(complex.DescentParked)
+	setParachute(true)
+end
+
+local function endFlight()
+	if abortConn then
+		abortConn:Disconnect()
+		abortConn = nil
+	end
+	restoreLighting()
+	Workspace.Gravity = Config.Gravity.Earth
+	resetRocket()
+	complex.Crawler:PivotTo(complex.CrawlerVAB)
+	resetDescent()
+	inFlight = false
+	canReturn = false
+	awaitingRescue = false
+	flyingPlayer = nil
+end
+
+local function fade(player: Player, action: string, duration: number)
+	screen:FireClient(player, action, duration)
+end
+
+local function humanoidOf(player: Player): Humanoid?
+	local character = player.Character
+	return character and character:FindFirstChildOfClass("Humanoid")
+end
+
+function LaunchSystem.isBusy(): boolean
+	return inFlight or rollingOut
+end
+
+function LaunchSystem.isReady(): boolean
+	return rocketAtPad and not inFlight and not rollingOut
+end
+
+function LaunchSystem.beginRollout(player: Player)
+	if inFlight or rollingOut then
+		notify:FireClient(player, "🚜 Hold on — something's already moving.")
+		return
+	end
+	if rocketAtPad then
+		notify:FireClient(player, "The rocket is already on the pad — suit up and board!")
+		return
+	end
+	rollingOut = true
+	notify:FireClient(player, `🚜 Assembling and rolling the rocket out to the pad (~{Config.Rocket.RolloutSeconds}s)...`)
+
+	task.spawn(function()
+		complex.Crawler:PivotTo(complex.CrawlerVAB)
+		local rFrom, rTo = complex.RocketVAB, complex.RocketStart
+		local cFrom, cTo = complex.CrawlerVAB, complex.CrawlerPad
+		local dur = Config.Rocket.RolloutSeconds
+		local t = 0
+		while t < dur do
+			local dt = task.wait()
+			t += dt
+			local f = math.clamp(t / dur, 0, 1)
+			complex.Rocket:PivotTo(rFrom:Lerp(rTo, f))
+			complex.Crawler:PivotTo(cFrom:Lerp(cTo, f))
+		end
+		complex.Rocket:PivotTo(rTo)
+		complex.Crawler:PivotTo(cTo)
+		rocketAtPad = true
+		rollingOut = false
+		notify:FireClient(player, "🚀 Rocket's on the pad! Suit up and board.")
+
+		-- Crawler retreats to the VAB.
+		local rdur = Config.Rocket.RolloutReturnSeconds
+		local rt = 0
+		while rt < rdur do
+			local dt = task.wait()
+			rt += dt
+			complex.Crawler:PivotTo(cTo:Lerp(cFrom, math.clamp(rt / rdur, 0, 1)))
+		end
+		complex.Crawler:PivotTo(cFrom)
+	end)
+end
+
+function LaunchSystem.beginCountdown(player: Player)
+	if inFlight then
+		notify:FireClient(player, "A launch is already in progress — stand by.")
+		return
+	end
+	if not humanoidOf(player) then
+		return
+	end
+
+	local dest = complex.FlightConsole:GetAttribute("Dest") or "EarthOrbit"
+	inFlight = true
+	flyingPlayer = player
+	abortConn = player.CharacterRemoving:Connect(endFlight)
+
+	task.spawn(function()
+		for n = Config.Launch.CountdownFrom, 1, -1 do
+			if not inFlight then
+				return
+			end
+			notify:FireClient(player, `T-minus {n}...`)
+			task.wait(1)
+		end
+		if not inFlight then
+			return
+		end
+
+		notify:FireClient(player, "🔥 Liftoff!")
+		setEngine(true)
+		launchFX:FireClient(player, Config.Launch.AscentSeconds)
+
+		local start = complex.Rocket:GetPivot()
+		local dur = Config.Launch.AscentSeconds
+		local height = Config.Launch.AscentHeight
+		local t = 0
+		while t < dur do
+			local dt = task.wait()
+			t += dt
+			if not inFlight then
+				return
+			end
+			local f = math.clamp(t / dur, 0, 1)
+			complex.Rocket:PivotTo(start + Vector3.new(0, height * f * f, 0))
+		end
+
+		notify:FireClient(player, `🛰️ Stage separation — on course for {labelFor(dest)}.`)
+		task.wait(1)
+		if not inFlight then
+			return
+		end
+
+		fade(player, "out", Config.Launch.FadeSeconds)
+		task.wait(Config.Launch.FadeSeconds + 0.1)
+		setSpaceLighting()
+
+		if dest == "Moon" or dest == "Mars" then
+			Workspace.Gravity = Config.Gravity[dest] or Config.Gravity.Moon
+			complex.SurfaceGround.Color = if dest == "Mars" then MARS_GROUND else MOON_GROUND
+
+			local hum = humanoidOf(player)
+			if hum then
+				hum.Sit = false
+			end
+			task.wait(0.15)
+			if player.Character then
+				player.Character:PivotTo(complex.SurfaceSpawn)
+			end
+			resetRocket()
+
+			fade(player, "in", 0.9)
+			task.wait(0.3)
+			notify:FireClient(player, `🛬 Touchdown on {labelFor(dest)}! Walk up to your rover and drive — return via the ascent stage.`)
+			canReturn = true
+		else
+			local hum = humanoidOf(player)
+			if hum then
+				complex.OrbitSeat:Sit(hum)
+			end
+			task.wait(0.1)
+			resetRocket()
+
+			fade(player, "in", 0.8)
+			task.wait(0.8)
+			notify:FireClient(player, "🌍 Orbit achieved! Deploying satellite...")
+
+			local idx = #deployedSats + 1
+			local name = string.format("SAT-%02d", idx)
+			local sat = WorldBuilder.makeSatellite(Config.Orbit.Center + Vector3.new(18, 2 + idx * 3, 0))
+			local from = sat:GetPivot()
+			local st = 0
+			while st < 2.5 do
+				local dt = task.wait()
+				st += dt
+				sat:PivotTo(from + Vector3.new(math.min(st, 2.5) * 8, 0, math.sin(st * 2) * 4))
+			end
+
+			table.insert(deployedSats, { name = name, status = "Nominal" })
+			refreshMonitor()
+			notify:FireClient(player, `🛰️ {name} deployed and nominal — track it at Mission Control.`)
+			canReturn = true
+		end
+	end)
+end
+
+local function onReturn(player: Player)
+	if player ~= flyingPlayer or not canReturn then
+		return
+	end
+	canReturn = false
+
+	task.spawn(function()
+		fade(player, "out", 0.7)
+		task.wait(0.8)
+		restoreLighting()
+		Workspace.Gravity = Config.Gravity.Earth
+
+		complex.DescentRig:PivotTo(complex.DescentStart)
+		setParachute(true)
+		local hum = humanoidOf(player)
+		if hum then
+			hum.Sit = false
+			task.wait(0.05)
+			complex.DescentSeat:Sit(hum)
+		end
+
+		fade(player, "in", 0.8)
+		notify:FireClient(player, "🔥 Re-entry! Parachute deployed — splashing down.")
+
+		local sx = Config.Splashdown.Point.X
+		local sz = Config.Splashdown.Point.Z
+		local startY = Config.Splashdown.StartHeight
+		local dur = Config.Splashdown.DescentSeconds
+		local t = 0
+		while t < dur do
+			local dt = task.wait()
+			t += dt
+			if not inFlight then
+				return
+			end
+			local f = math.clamp(t / dur, 0, 1)
+			local y = startY + (2 - startY) * f
+			local sway = math.sin(t * 1.4) * 7 * (1 - f)
+			complex.DescentRig:PivotTo(CFrame.new(sx + sway, y, sz))
+		end
+
+		setParachute(false)
+		notify:FireClient(player, "🌊 Splashdown! You're floating safely — call for pickup.")
+		awaitingRescue = true
+		rescuePrompt:FireClient(player, true)
+	end)
+end
+
+function LaunchSystem.requestRescue(player: Player)
+	if player ~= flyingPlayer or not awaitingRescue then
+		return
+	end
+	awaitingRescue = false
+	rescuePrompt:FireClient(player, false)
+	notify:FireClient(player, "🚤 Rescue boats dispatched!")
+
+	task.spawn(function()
+		local target = complex.DescentRig:GetPivot().Position
+		local boat = WorldBuilder.makeBoat(Vector3.new(Config.Rescue.ShoreX, 1, Config.Splashdown.Point.Z))
+		local from = boat:GetPivot()
+		local to = CFrame.new(target.X - 9, 1, target.Z)
+		local dur = Config.Rescue.BoatSpeedSeconds
+		local t = 0
+		while t < dur do
+			local dt = task.wait()
+			t += dt
+			if not inFlight then
+				boat:Destroy()
+				return
+			end
+			boat:PivotTo(from:Lerp(to, math.clamp(t / dur, 0, 1)))
+		end
+
+		notify:FireClient(player, "🪝 Pulling you aboard...")
+		task.wait(1.2)
+		fade(player, "out", 0.6)
+		task.wait(0.7)
+		player:LoadCharacter()
+		boat:Destroy()
+		endFlight()
+		fade(player, "in", 0.8)
+		notify:FireClient(player, "✅ Rescued! Welcome back to the Cape.")
+	end)
+end
+
+local function onCycleDestination(player: Player)
+	if inFlight or rollingOut then
+		notify:FireClient(player, "Can't change the flight plan mid-mission.")
+		return
+	end
+	local cur = complex.FlightConsole:GetAttribute("Dest") or "EarthOrbit"
+	local idx = table.find(Config.Destinations, cur) or 1
+	local nextDest = Config.Destinations[(idx % #Config.Destinations) + 1]
+	complex.FlightConsole:SetAttribute("Dest", nextDest)
+	complex.FlightLabel.Text = "Destination: " .. labelFor(nextDest)
+	notify:FireClient(player, "🧭 Destination set: " .. labelFor(nextDest))
+end
+
+local function onDrive(player: Player)
+	local character = player.Character
+	local hrp = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not hrp then
+		return
+	end
+	-- Lift the player onto the seat; the VehicleSeat grabs them on contact.
+	hrp.CFrame = complex.RoverSeat.CFrame * CFrame.new(0, 2, 0)
+end
+
+function LaunchSystem.start(complexRef: any)
+	complex = complexRef
+	complex.OrbitReturnPrompt.Triggered:Connect(onReturn)
+	complex.SurfaceReturnPrompt.Triggered:Connect(onReturn)
+	complex.FlightCyclePrompt.Triggered:Connect(onCycleDestination)
+	complex.RoverDrivePrompt.Triggered:Connect(onDrive)
+	complex.RolloutPrompt.Triggered:Connect(function(player: Player)
+		LaunchSystem.beginRollout(player)
+	end)
+
+	rescue.OnServerEvent:Connect(function(player: Player)
+		LaunchSystem.requestRescue(player)
+	end)
+
+	refreshMonitor()
+
+	-- Kinematic rover driving while a player occupies the seat.
+	RunService.Heartbeat:Connect(function(dt: number)
+		local seat = complex.RoverSeat
+		if not seat.Occupant then
+			return
+		end
+		local throttle = seat.ThrottleFloat
+		local steer = seat.SteerFloat
+		if throttle == 0 and steer == 0 then
+			return
+		end
+		local turn = -steer * Config.Rover.TurnRate * dt
+		local fwd = throttle * Config.Rover.Speed * dt
+		complex.Rover:PivotTo(complex.Rover:GetPivot() * CFrame.Angles(0, turn, 0) * CFrame.new(0, 0, -fwd))
+	end)
+end
+
+return LaunchSystem
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="8">
+          <Properties>
+            <string name="Name">RocketBoarding</string>
+            <string name="Source"><![CDATA[--!strict
+-- Boarding gate: the rocket's prompt seats the player and kicks off the launch,
+-- but only if they're suited up and no flight is already underway.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Remotes = require(ReplicatedStorage.Shared.Remotes)
+
+local RocketBoarding = {}
+
+local notify = Remotes.event("Notify")
+
+function RocketBoarding.start(complex: any, launchSystem: any)
+	local prompt: ProximityPrompt = complex.BoardPrompt
+	local seat: Seat = complex.RocketSeat
+
+	prompt.Triggered:Connect(function(player: Player)
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if not humanoid then
+			return
+		end
+		if not player:GetAttribute("HasSuit") then
+			notify:FireClient(player, "🚫 No suit, no launch — put on a space suit first!")
+			return
+		end
+		if launchSystem.isBusy() then
+			notify:FireClient(player, "🚀 A launch is in progress — wait for the astronaut to return.")
+			return
+		end
+		if not launchSystem.isReady() then
+			notify:FireClient(player, "🚧 The rocket isn't on the pad yet — roll it out from the Vehicle Assembly Building first.")
+			return
+		end
+		seat:Sit(humanoid)
+		launchSystem.beginCountdown(player)
+	end)
+end
+
+return RocketBoarding
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="9">
+          <Properties>
+            <string name="Name">SuitSystem</string>
+            <string name="Source"><![CDATA[--!strict
+-- Suit-up gate: triggering the Suit Station prompt equips a space suit
+-- (helmet + life-support pack) on the player's character and flags them as
+-- suited. The suit is lost on respawn, so they must suit up each life.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+local Remotes = require(ReplicatedStorage.Shared.Remotes)
+
+local SuitSystem = {}
+
+local notify = Remotes.event("Notify")
+
+local function weld(a: BasePart, b: BasePart)
+	local w = Instance.new("WeldConstraint")
+	w.Part0 = a
+	w.Part1 = b
+	w.Parent = a
+end
+
+local function applySuit(character: Model)
+	local head = character:FindFirstChild("Head") :: BasePart?
+	if head and not character:FindFirstChild("SM_Helmet") then
+		local helmet = Instance.new("Part")
+		helmet.Name = "SM_Helmet"
+		helmet.Shape = Enum.PartType.Ball
+		helmet.Size = head.Size * 1.7
+		helmet.Color = Config.Suit.HelmetColor
+		helmet.Material = Enum.Material.Glass
+		helmet.Transparency = 0.35
+		helmet.CanCollide = false
+		helmet.Massless = true
+		helmet.CFrame = head.CFrame
+		helmet.Parent = character
+		weld(helmet, head)
+	end
+
+	local torso = (character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")) :: BasePart?
+	if torso and not character:FindFirstChild("SM_Pack") then
+		local pack = Instance.new("Part")
+		pack.Name = "SM_Pack"
+		pack.Size = Vector3.new(1.6, 2, 0.8)
+		pack.Color = Config.Suit.SuitColor
+		pack.Material = Enum.Material.Metal
+		pack.CanCollide = false
+		pack.Massless = true
+		pack.CFrame = torso.CFrame * CFrame.new(0, 0.2, 0.85)
+		pack.Parent = character
+		weld(pack, torso)
+	end
+end
+
+local function trackPlayer(player: Player)
+	player:SetAttribute("HasSuit", false)
+	player.CharacterAdded:Connect(function()
+		player:SetAttribute("HasSuit", false)
+	end)
+end
+
+function SuitSystem.start(complex: any)
+	local prompt: ProximityPrompt = complex.SuitPrompt
+	prompt.Triggered:Connect(function(player: Player)
+		local character = player.Character
+		if not character then
+			return
+		end
+		if player:GetAttribute("HasSuit") then
+			notify:FireClient(player, "You're already suited up.")
+			return
+		end
+		applySuit(character)
+		player:SetAttribute("HasSuit", true)
+		notify:FireClient(player, "🧑‍🚀 Space suit on — head to the rocket!")
+	end)
+
+	Players.PlayerAdded:Connect(trackPlayer)
+	for _, player in Players:GetPlayers() do
+		trackPlayer(player)
+	end
+end
+
+return SuitSystem
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="10">
+          <Properties>
+            <string name="Name">WorldBuilder</string>
+            <string name="Source"><![CDATA[--!strict
+-- Builds the launch complex AND the orbit scene out of Parts at runtime, so the
+-- whole environment lives in version control. The rocket is an original two-stage
+-- orbital design (engine cluster, grid fins, interstage, second stage, fairing).
+-- Swap these placeholders for nicer models in Studio later — systems only need the
+-- named references back.
+
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+
+local WorldBuilder = {}
+
+export type Complex = {
+	Model: Model,
+	Rocket: Model,
+	RocketSeat: Seat,
+	RocketStart: CFrame,
+	BoardPrompt: ProximityPrompt,
+	EngineFX: BasePart,
+	SuitStation: BasePart,
+	SuitPrompt: ProximityPrompt,
+	OrbitSeat: Seat,
+	OrbitReturnPrompt: ProximityPrompt,
+	Satellite: Model,
+	DescentRig: Model,
+	DescentSeat: Seat,
+	DescentStart: CFrame,
+	DescentParked: CFrame,
+	SurfaceGround: BasePart,
+	SurfaceSpawn: CFrame,
+	Rover: Model,
+	RoverSeat: VehicleSeat,
+	RoverDrivePrompt: ProximityPrompt,
+	SurfaceReturnPrompt: ProximityPrompt,
+	FlightConsole: BasePart,
+	FlightLabel: TextLabel,
+	FlightCyclePrompt: ProximityPrompt,
+	Crawler: Model,
+	RocketVAB: CFrame,
+	CrawlerVAB: CFrame,
+	CrawlerPad: CFrame,
+	RolloutPrompt: ProximityPrompt,
+	MonitorLabel: TextLabel,
+}
+
+local CONCRETE = Color3.fromRGB(150, 150, 158)
+local WHITE = Color3.fromRGB(240, 242, 248)
+local DARK = Color3.fromRGB(45, 48, 58)
+local GREY = Color3.fromRGB(90, 92, 100)
+local NOZZLE = Color3.fromRGB(70, 72, 80)
+local ACCENT = Color3.fromRGB(70, 130, 220)
+
+local function part(parent: Instance, props: { [string]: any }): Part
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	for k, v in props do
+		(p :: any)[k] = v
+	end
+	p.Parent = parent
+	return p
+end
+
+-- Vertical cylinder (Roblox cylinders run along their X axis, so we stand them up).
+local function vcyl(parent: Instance, name: string, x: number, z: number, y: number, height: number, dia: number, color: Color3, material: Enum.Material?): Part
+	return part(parent, {
+		Name = name,
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(height, dia, dia),
+		Color = color,
+		Material = material or Enum.Material.SmoothPlastic,
+		CFrame = CFrame.new(x, y, z) * CFrame.Angles(0, 0, math.rad(90)),
+	})
+end
+
+local function block(parent: Instance, name: string, cframe: CFrame, size: Vector3, color: Color3, material: Enum.Material?): Part
+	return part(parent, {
+		Name = name,
+		Size = size,
+		Color = color,
+		Material = material or Enum.Material.SmoothPlastic,
+		CFrame = cframe,
+	})
+end
+
+local function nameTag(adornee: BasePart, text: string, height: number)
+	local bb = Instance.new("BillboardGui")
+	bb.Name = "NameTag"
+	bb.Size = UDim2.new(0, 280, 0, 54)
+	bb.StudsOffsetWorldSpace = Vector3.new(0, height, 0)
+	bb.AlwaysOnTop = true
+	bb.MaxDistance = 600
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBold
+	label.Text = text
+	label.TextColor3 = WHITE
+	label.TextStrokeTransparency = 0.4
+	label.TextScaled = true
+	label.Parent = bb
+
+	bb.Adornee = adornee
+	bb.Parent = adornee
+end
+
+local function buildRocket(parent: Instance, base: Vector3): (Model, Seat, ProximityPrompt, BasePart)
+	local bx, bz = base.X, base.Z
+	local rocket = Instance.new("Model")
+	rocket.Name = "Rocket"
+
+	-- First stage + engine skirt + accent stripe
+	vcyl(rocket, "Stage1", bx, bz, base.Y + 16, 30, 7, WHITE)
+	vcyl(rocket, "EngineSkirt", bx, bz, base.Y + 2.5, 3, 7.3, DARK)
+	vcyl(rocket, "Stripe", bx, bz, base.Y + 23, 1.5, 7.12, ACCENT)
+
+	-- Engine nozzles (centre + ring of four)
+	vcyl(rocket, "Nozzle", bx, bz, base.Y + 2.2, 2.4, 1.8, NOZZLE)
+	for i = 0, 3 do
+		local a = math.rad(i * 90)
+		vcyl(rocket, "Nozzle", bx + math.cos(a) * 2, bz + math.sin(a) * 2, base.Y + 2.2, 2.4, 1.6, NOZZLE)
+	end
+
+	-- Base fins
+	for i = 0, 3 do
+		local a = math.rad(i * 90)
+		block(rocket, "Fin", CFrame.new(bx + math.cos(a) * 3.6, base.Y + 4.5, bz + math.sin(a) * 3.6) * CFrame.Angles(0, -a, 0), Vector3.new(0.6, 7, 3), DARK)
+	end
+
+	-- Grid fins near the top of the first stage
+	for i = 0, 3 do
+		local a = math.rad(i * 90 + 45)
+		block(rocket, "GridFin", CFrame.new(bx + math.cos(a) * 3.8, base.Y + 26, bz + math.sin(a) * 3.8) * CFrame.Angles(0, -a, 0), Vector3.new(0.3, 2.6, 2.6), GREY)
+	end
+
+	-- Interstage + second stage
+	vcyl(rocket, "Interstage", bx, bz, base.Y + 32, 2, 7, DARK)
+	vcyl(rocket, "Stage2", bx, bz, base.Y + 39, 12, 6.4, WHITE)
+
+	-- Tapered payload fairing (semi-transparent so the rover payload shows) + nose tip
+	local f1 = vcyl(rocket, "Fairing", bx, bz, base.Y + 46.5, 3, 6, WHITE)
+	local f2 = vcyl(rocket, "Fairing", bx, bz, base.Y + 49, 2.5, 4.5, WHITE)
+	local f3 = vcyl(rocket, "Fairing", bx, bz, base.Y + 51, 1.5, 3, WHITE)
+	f1.Transparency = 0.3
+	f2.Transparency = 0.3
+	f3.Transparency = 0.3
+	part(rocket, {
+		Name = "Tip",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(3, 3, 3),
+		Color = WHITE,
+		Material = Enum.Material.SmoothPlastic,
+		CFrame = CFrame.new(bx, base.Y + 52.2, bz),
+	})
+
+	-- Stowed rover payload sitting in the top of the rocket (the one you deploy on the surface)
+	block(rocket, "PayloadDeck", CFrame.new(bx, base.Y + 45.4, bz), Vector3.new(4.2, 0.4, 4.2), Color3.fromRGB(60, 63, 72))
+	block(rocket, "PayloadRover", CFrame.new(bx, base.Y + 46.5, bz), Vector3.new(3.4, 1.6, 3.6), Color3.fromRGB(220, 200, 80))
+	for i = 0, 3 do
+		local wx = if i % 2 == 0 then 1.4 else -1.4
+		local wz = if i < 2 then 1.4 else -1.4
+		part(rocket, {
+			Name = "PayloadWheel",
+			Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(0.7, 1.4, 1.4),
+			Color = Color3.fromRGB(40, 42, 48),
+			CFrame = CFrame.new(bx + wx, base.Y + 45.9, bz + wz),
+		})
+	end
+
+	-- Capsule window
+	block(rocket, "Window", CFrame.new(bx, base.Y + 39, bz + 3.25), Vector3.new(1.4, 1.4, 0.25), Color3.fromRGB(40, 60, 95))
+
+	-- Pilot seat, up inside the capsule
+	local seat = Instance.new("Seat")
+	seat.Name = "PilotSeat"
+	seat.Anchored = true
+	seat.CanCollide = false
+	seat.Transparency = 1
+	seat.Size = Vector3.new(3, 1, 3)
+	seat.CFrame = CFrame.new(bx, base.Y + 38, bz)
+	seat.Parent = rocket
+
+	-- Boarding prompt down at the base where players walk up
+	local skirt = rocket:FindFirstChild("EngineSkirt") :: BasePart
+	local boardPrompt = Instance.new("ProximityPrompt")
+	boardPrompt.Name = "BoardPrompt"
+	boardPrompt.ActionText = "Enter Rocket"
+	boardPrompt.ObjectText = "Rocket"
+	boardPrompt.HoldDuration = 0.5
+	boardPrompt.RequiresLineOfSight = false
+	boardPrompt.MaxActivationDistance = Config.Rocket.PromptDistance
+	boardPrompt.Parent = skirt
+
+	-- Engine effects host at the very base
+	local engineFX = part(rocket, {
+		Name = "EngineFX",
+		Size = Vector3.new(1, 1, 1),
+		Transparency = 1,
+		CanCollide = false,
+		CFrame = CFrame.new(bx, base.Y + 0.6, bz),
+	})
+
+	local flame = Instance.new("ParticleEmitter")
+	flame.Name = "Flame"
+	flame.Enabled = false
+	flame.EmissionDirection = Enum.NormalId.Bottom
+	flame.Rate = 140
+	flame.Lifetime = NumberRange.new(0.3, 0.7)
+	flame.Speed = NumberRange.new(25, 45)
+	flame.SpreadAngle = Vector2.new(12, 12)
+	flame.LightEmission = 1
+	flame.Color = ColorSequence.new(Color3.fromRGB(255, 190, 70), Color3.fromRGB(255, 90, 25))
+	flame.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 2), NumberSequenceKeypoint.new(1, 6) })
+	flame.Parent = engineFX
+
+	local smoke = Instance.new("ParticleEmitter")
+	smoke.Name = "Smoke"
+	smoke.Enabled = false
+	smoke.EmissionDirection = Enum.NormalId.Bottom
+	smoke.Rate = 70
+	smoke.Lifetime = NumberRange.new(1, 2)
+	smoke.Speed = NumberRange.new(12, 22)
+	smoke.SpreadAngle = Vector2.new(25, 25)
+	smoke.Color = ColorSequence.new(Color3.fromRGB(225, 225, 225))
+	smoke.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 4), NumberSequenceKeypoint.new(1, 11) })
+	smoke.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.25), NumberSequenceKeypoint.new(1, 1) })
+	smoke.Parent = engineFX
+
+	local light = Instance.new("PointLight")
+	light.Name = "EngineLight"
+	light.Enabled = false
+	light.Brightness = 6
+	light.Range = 32
+	light.Color = Color3.fromRGB(255, 170, 80)
+	light.Parent = engineFX
+
+	rocket.PrimaryPart = rocket:FindFirstChild("Stage1") :: BasePart
+	rocket.Parent = parent
+	return rocket, seat, boardPrompt, engineFX
+end
+
+local function buildOrbitScene(parent: Instance, center: Vector3): (Seat, ProximityPrompt, Model)
+	local cx, cy, cz = center.X, center.Y, center.Z
+	local earthCenter = Vector3.new(cx, cy - 520, cz)
+
+	part(parent, {
+		Name = "Earth",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(700, 700, 700),
+		Position = earthCenter,
+		Color = Color3.fromRGB(38, 86, 162),
+		Material = Enum.Material.SmoothPlastic,
+	})
+	part(parent, {
+		Name = "Atmosphere",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(744, 744, 744),
+		Position = earthCenter,
+		Color = Color3.fromRGB(135, 180, 255),
+		Material = Enum.Material.SmoothPlastic,
+		Transparency = 0.62,
+		CanCollide = false,
+	})
+
+	local dirs = {
+		Vector3.new(1, 0.35, 0.2),
+		Vector3.new(-0.6, 0.5, 0.5),
+		Vector3.new(0.2, -0.45, 0.85),
+		Vector3.new(-0.35, -0.6, -0.55),
+		Vector3.new(0.55, 0.25, -0.75),
+	}
+	for i, d in dirs do
+		local size = 150 + i * 12
+		part(parent, {
+			Name = "Continent",
+			Shape = Enum.PartType.Ball,
+			Size = Vector3.new(size, size, size),
+			Position = earthCenter + d.Unit * 330,
+			Color = Color3.fromRGB(72, 148, 84),
+			Material = Enum.Material.SmoothPlastic,
+			CanCollide = false,
+		})
+	end
+
+	-- Re-entry capsule the player rides in orbit
+	vcyl(parent, "Capsule", cx, cz, cy, 3, 7, Color3.fromRGB(205, 210, 218))
+	part(parent, {
+		Name = "CapsuleDome",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(7, 7, 7),
+		Position = Vector3.new(cx, cy + 2.4, cz),
+		Color = Color3.fromRGB(205, 210, 218),
+		Material = Enum.Material.SmoothPlastic,
+	})
+
+	local orbitSeat = Instance.new("Seat")
+	orbitSeat.Name = "OrbitSeat"
+	orbitSeat.Anchored = true
+	orbitSeat.CanCollide = false
+	orbitSeat.Transparency = 1
+	orbitSeat.Size = Vector3.new(3, 1, 3)
+	orbitSeat.CFrame = CFrame.new(cx, cy + 0.5, cz)
+	orbitSeat.Parent = parent
+
+	local capsulePart = parent:FindFirstChild("Capsule") :: BasePart
+	local returnPrompt = Instance.new("ProximityPrompt")
+	returnPrompt.Name = "OrbitReturnPrompt"
+	returnPrompt.ActionText = "Return to Earth"
+	returnPrompt.ObjectText = "Re-entry Capsule"
+	returnPrompt.HoldDuration = 1
+	returnPrompt.RequiresLineOfSight = false
+	returnPrompt.MaxActivationDistance = 18
+	returnPrompt.Parent = capsulePart
+
+	-- Pre-placed satellite (scenery); player-deployed ones are spawned at runtime.
+	local satellite = WorldBuilder.makeSatellite(Vector3.new(cx + 26, cy + 5, cz))
+
+	return orbitSeat, returnPrompt, satellite
+end
+
+local function buildDescentRig(parent: Instance, base: Vector3): (Model, Seat)
+	local bx, bz = base.X, base.Z
+	local rig = Instance.new("Model")
+	rig.Name = "DescentRig"
+
+	-- Axis-aligned root so we can re-orient the rig safely while descending.
+	local root = part(rig, {
+		Name = "Root",
+		Size = Vector3.new(1, 1, 1),
+		Transparency = 1,
+		CanCollide = false,
+		CFrame = CFrame.new(bx, base.Y + 2, bz),
+	})
+
+	vcyl(rig, "Capsule", bx, bz, base.Y + 1.5, 3, 7, Color3.fromRGB(60, 64, 72))
+	vcyl(rig, "Shield", bx, bz, base.Y + 0.2, 0.8, 7.4, Color3.fromRGB(34, 31, 29))
+	part(rig, {
+		Name = "CapsuleDome",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(7, 7, 7),
+		Position = Vector3.new(bx, base.Y + 3.9, bz),
+		Color = Color3.fromRGB(70, 74, 82),
+		Material = Enum.Material.SmoothPlastic,
+	})
+
+	local seat = Instance.new("Seat")
+	seat.Name = "DescentSeat"
+	seat.Anchored = true
+	seat.CanCollide = false
+	seat.Transparency = 1
+	seat.Size = Vector3.new(3, 1, 3)
+	seat.CFrame = CFrame.new(bx, base.Y + 2, bz)
+	seat.Parent = rig
+
+	local chute = Instance.new("Model")
+	chute.Name = "Parachute"
+	chute.Parent = rig
+
+	local canopy = part(chute, {
+		Name = "Canopy",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(46, 18, 46),
+		Position = Vector3.new(bx, base.Y + 34, bz),
+		Color = Color3.fromRGB(232, 96, 52),
+		Material = Enum.Material.SmoothPlastic,
+		CanCollide = false,
+		Transparency = 0.05,
+	})
+	canopy:SetAttribute("Vis", 0.05)
+
+	for i = 0, 5 do
+		local a = math.rad(i * 60)
+		local rim = Vector3.new(bx + math.cos(a) * 19, base.Y + 30, bz + math.sin(a) * 19)
+		local cap = Vector3.new(bx + math.cos(a) * 2.5, base.Y + 6, bz + math.sin(a) * 2.5)
+		local mid = (rim + cap) / 2
+		local line = part(chute, {
+			Name = "Line",
+			Size = Vector3.new(0.18, 0.18, (rim - cap).Magnitude),
+			Color = Color3.fromRGB(240, 240, 245),
+			CanCollide = false,
+			CFrame = CFrame.lookAt(mid, cap),
+		})
+		line:SetAttribute("Vis", 0)
+	end
+
+	rig.PrimaryPart = root
+	rig.Parent = parent
+	return rig, seat
+end
+
+local function buildRover(parent: Instance, position: Vector3): (Model, VehicleSeat, ProximityPrompt)
+	local p = position
+	local rover = Instance.new("Model")
+	rover.Name = "Rover"
+
+	local chassis = part(rover, {
+		Name = "Chassis",
+		Size = Vector3.new(6, 1.4, 9),
+		Position = p,
+		Color = Color3.fromRGB(220, 200, 80),
+		Material = Enum.Material.Metal,
+	})
+	part(rover, {
+		Name = "Body",
+		Size = Vector3.new(5, 1.6, 5),
+		Position = p + Vector3.new(0, 1.4, -1.2),
+		Color = Color3.fromRGB(235, 238, 244),
+	})
+	part(rover, {
+		Name = "Solar",
+		Size = Vector3.new(5.4, 0.2, 4),
+		Position = p + Vector3.new(0, 2.3, -1.2),
+		Color = Color3.fromRGB(40, 60, 120),
+	})
+
+	for i = 0, 3 do
+		local wx = if i % 2 == 0 then 3.2 else -3.2
+		local wz = if i < 2 then 3 else -3
+		part(rover, {
+			Name = "Wheel",
+			Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(1.2, 3, 3),
+			Color = Color3.fromRGB(40, 42, 48),
+			CFrame = CFrame.new(p.X + wx, p.Y - 0.6, p.Z + wz),
+		})
+	end
+
+	vcyl(rover, "Mast", p.X - 1.6, p.Z - 1.2, p.Y + 2.8, 2.4, 0.3, Color3.fromRGB(120, 122, 130))
+
+	local seat = Instance.new("VehicleSeat")
+	seat.Name = "RoverSeat"
+	seat.Anchored = true
+	seat.Size = Vector3.new(3, 1, 3)
+	seat.Position = p + Vector3.new(0, 1.5, 1.6)
+	seat.Color = Color3.fromRGB(55, 58, 68)
+	seat.MaxSpeed = 0
+	seat.Torque = 0
+	seat.HeadsUpDisplay = false
+	seat.Parent = rover
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "RoverDrivePrompt"
+	prompt.ActionText = "Drive Rover"
+	prompt.ObjectText = "Rover"
+	prompt.HoldDuration = 0.3
+	prompt.RequiresLineOfSight = false
+	prompt.MaxActivationDistance = 12
+	prompt.Parent = chassis
+
+	rover.PrimaryPart = chassis
+	rover.Parent = parent
+	return rover, seat, prompt
+end
+
+local function buildSurface(parent: Instance, center: Vector3): (BasePart, CFrame, Model, VehicleSeat, ProximityPrompt, ProximityPrompt)
+	local cx, cy, cz = center.X, center.Y, center.Z
+
+	local ground = part(parent, {
+		Name = "SurfaceGround",
+		Size = Vector3.new(1200, 4, 1200),
+		Position = Vector3.new(cx, cy - 2, cz),
+		Color = Color3.fromRGB(132, 132, 138),
+		Material = Enum.Material.Sand,
+	})
+
+	local spots = {
+		Vector3.new(40, 30), Vector3.new(-50, 60), Vector3.new(70, -40),
+		Vector3.new(-30, -70), Vector3.new(95, 55), Vector3.new(-80, -20),
+	}
+	for i, s in spots do
+		local r = 4 + (i % 3) * 3
+		part(parent, {
+			Name = "Rock",
+			Shape = Enum.PartType.Ball,
+			Size = Vector3.new(r * 2, r * 2, r * 2),
+			Position = Vector3.new(cx + s.X, cy + r * 0.4, cz + s.Y),
+			Color = Color3.fromRGB(110, 110, 116),
+			Material = Enum.Material.Slate,
+		})
+	end
+
+	part(parent, {
+		Name = "BaseHab",
+		Size = Vector3.new(16, 8, 12),
+		Position = Vector3.new(cx - 34, cy + 4, cz - 22),
+		Color = Color3.fromRGB(225, 228, 235),
+		Material = Enum.Material.Metal,
+	})
+	part(parent, {
+		Name = "BaseDome",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(26, 26, 26),
+		Position = Vector3.new(cx - 16, cy + 3, cz - 22),
+		Color = Color3.fromRGB(205, 212, 222),
+		Material = Enum.Material.Glass,
+		Transparency = 0.3,
+	})
+
+	-- Lander / ascent stage (carries you home)
+	local landerPos = Vector3.new(cx, cy, cz - 6)
+	part(parent, {
+		Name = "LanderBase",
+		Size = Vector3.new(9, 4, 9),
+		Position = landerPos + Vector3.new(0, 3, 0),
+		Color = Color3.fromRGB(184, 150, 60),
+		Material = Enum.Material.Metal,
+	})
+	for i = 0, 3 do
+		local a = math.rad(i * 90 + 45)
+		block(parent, "LanderLeg", CFrame.new(cx + math.cos(a) * 6, cy + 1.5, cz - 6 + math.sin(a) * 6) * CFrame.Angles(math.rad(20), -a, 0), Vector3.new(0.6, 6, 0.6), Color3.fromRGB(90, 92, 100))
+	end
+	local landerCap = part(parent, {
+		Name = "LanderCapsule",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(6, 6, 6),
+		Position = landerPos + Vector3.new(0, 7, 0),
+		Color = Color3.fromRGB(200, 205, 212),
+		Material = Enum.Material.SmoothPlastic,
+	})
+	local returnPrompt = Instance.new("ProximityPrompt")
+	returnPrompt.Name = "SurfaceReturnPrompt"
+	returnPrompt.ActionText = "Return to Earth"
+	returnPrompt.ObjectText = "Ascent Stage"
+	returnPrompt.HoldDuration = 1
+	returnPrompt.RequiresLineOfSight = false
+	returnPrompt.MaxActivationDistance = 14
+	returnPrompt.Parent = landerCap
+
+	local rover, roverSeat, drivePrompt = buildRover(parent, Vector3.new(cx + 16, cy + 2.1, cz + 6))
+	local spawnCF = CFrame.new(Vector3.new(cx + 6, cy + 4, cz + 8), Vector3.new(cx + 16, cy + 2, cz + 6))
+
+	return ground, spawnCF, rover, roverSeat, drivePrompt, returnPrompt
+end
+
+function WorldBuilder.makeSatellite(position: Vector3): Model
+	local satellite = Instance.new("Model")
+	satellite.Name = "Satellite"
+	local satBody = part(satellite, {
+		Name = "Body",
+		Size = Vector3.new(3, 3, 4),
+		Position = position,
+		Color = Color3.fromRGB(188, 194, 205),
+		Material = Enum.Material.Metal,
+	})
+	part(satellite, {
+		Name = "Panel",
+		Size = Vector3.new(10, 0.2, 4),
+		Position = position + Vector3.new(6.5, 0, 0),
+		Color = Color3.fromRGB(40, 60, 120),
+	})
+	part(satellite, {
+		Name = "Panel",
+		Size = Vector3.new(10, 0.2, 4),
+		Position = position - Vector3.new(6.5, 0, 0),
+		Color = Color3.fromRGB(40, 60, 120),
+	})
+	vcyl(satellite, "Mast", position.X, position.Z, position.Y + 3.2, 3, 0.4, GREY)
+	part(satellite, {
+		Name = "Dish",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(2.4, 2.4, 2.4),
+		Position = position + Vector3.new(0, 4.6, 0),
+		Color = Color3.fromRGB(220, 222, 228),
+	})
+	satellite.PrimaryPart = satBody
+	satellite.Parent = Workspace
+	return satellite
+end
+
+local function buildCrawler(parent: Instance, pos: Vector3): Model
+	local crawler = Instance.new("Model")
+	crawler.Name = "Crawler"
+	local deck = part(crawler, {
+		Name = "Deck",
+		Size = Vector3.new(20, 1.2, 26),
+		Position = pos,
+		Color = Color3.fromRGB(70, 72, 80),
+		Material = Enum.Material.DiamondPlate,
+	})
+	for _, x in { -8, 8 } do
+		part(crawler, {
+			Name = "Tread",
+			Size = Vector3.new(3, 1.8, 26),
+			Position = pos + Vector3.new(x, -0.5, 0),
+			Color = Color3.fromRGB(34, 36, 42),
+			Material = Enum.Material.Metal,
+		})
+	end
+	crawler.PrimaryPart = deck
+	crawler.Parent = parent
+	return crawler
+end
+
+function WorldBuilder.makeBoat(position: Vector3): Model
+	local boat = Instance.new("Model")
+	boat.Name = "RescueBoat"
+	local hull = part(boat, {
+		Name = "Hull",
+		Size = Vector3.new(12, 2.5, 5),
+		Position = position,
+		Color = Color3.fromRGB(185, 60, 55),
+		Material = Enum.Material.SmoothPlastic,
+	})
+	part(boat, {
+		Name = "Deck",
+		Size = Vector3.new(12, 0.4, 5),
+		Position = position + Vector3.new(0, 1.45, 0),
+		Color = Color3.fromRGB(220, 222, 228),
+	})
+	part(boat, {
+		Name = "Cabin",
+		Size = Vector3.new(4, 2.6, 4),
+		Position = position + Vector3.new(-2.5, 2.8, 0),
+		Color = Color3.fromRGB(236, 238, 244),
+	})
+	part(boat, {
+		Name = "Beacon",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(1, 1, 1),
+		Position = position + Vector3.new(-2.5, 4.3, 0),
+		Color = Color3.fromRGB(255, 90, 60),
+		Material = Enum.Material.Neon,
+	})
+	boat.PrimaryPart = hull
+	boat.Parent = Workspace
+	return boat
+end
+
+function WorldBuilder.build(): Complex
+	local model = Instance.new("Model")
+	model.Name = "SpaceMan"
+	model.Parent = Workspace
+
+	part(model, {
+		Name = "Ground",
+		Size = Vector3.new(280, 1, 320),
+		Position = Vector3.new(0, -0.5, 0),
+		Color = Color3.fromRGB(78, 110, 70),
+		Material = Enum.Material.Grass,
+	})
+
+	local spawnPad = Instance.new("SpawnLocation")
+	spawnPad.Name = "Spawn"
+	spawnPad.Anchored = true
+	spawnPad.Size = Vector3.new(10, 1, 10)
+	spawnPad.Position = Vector3.new(0, 0.5, 74)
+	spawnPad.Color = CONCRETE
+	spawnPad.Material = Enum.Material.Concrete
+	spawnPad.Neutral = true
+	spawnPad.Duration = 0
+	spawnPad.Parent = model
+
+	local suitStation = part(model, {
+		Name = "SuitStation",
+		Size = Vector3.new(8, 4, 8),
+		Position = Vector3.new(16, 2, 62),
+		Color = ACCENT,
+		Material = Enum.Material.Metal,
+	})
+	nameTag(suitStation, "🧑‍🚀 SUIT UP", 4)
+
+	local suitPrompt = Instance.new("ProximityPrompt")
+	suitPrompt.Name = "SuitPrompt"
+	suitPrompt.ActionText = "Put on Space Suit"
+	suitPrompt.ObjectText = "Suit Station"
+	suitPrompt.HoldDuration = 1
+	suitPrompt.RequiresLineOfSight = false
+	suitPrompt.MaxActivationDistance = Config.Suit.PromptDistance
+	suitPrompt.Parent = suitStation
+
+	local vab = part(model, {
+		Name = "VehicleAssemblyBuilding",
+		Size = Vector3.new(34, 56, 34),
+		Position = Vector3.new(0, 28, 40),
+		Color = WHITE,
+		Material = Enum.Material.Concrete,
+	})
+	nameTag(vab, "VEHICLE ASSEMBLY", 30)
+
+	local mc = part(model, {
+		Name = "MissionControl",
+		Size = Vector3.new(30, 14, 22),
+		Position = Vector3.new(-56, 7, 20),
+		Color = Color3.fromRGB(208, 210, 216),
+		Material = Enum.Material.Concrete,
+	})
+	nameTag(mc, "MISSION CONTROL", 9)
+
+	part(model, {
+		Name = "Crawlerway",
+		Size = Vector3.new(16, 0.3, 112),
+		Position = Vector3.new(0, 0.15, -16),
+		Color = Color3.fromRGB(120, 110, 95),
+		Material = Enum.Material.Ground,
+	})
+
+	local padCenter = Vector3.new(0, 0.5, -72)
+	part(model, {
+		Name = "LaunchPad",
+		Size = Vector3.new(40, 1, 40),
+		Position = padCenter,
+		Color = DARK,
+		Material = Enum.Material.Slate,
+	})
+
+	for i = 0, 3 do
+		part(model, {
+			Name = "TowerLeg",
+			Size = Vector3.new(1, 50, 1),
+			Position = Vector3.new(-14 + (i % 2) * 2, 25, -74 + math.floor(i / 2) * 2),
+			Color = DARK,
+			Material = Enum.Material.Metal,
+		})
+	end
+
+	local rocket, seat, boardPrompt, engineFX = buildRocket(model, Vector3.new(padCenter.X, 1, padCenter.Z))
+	local orbitSeat, orbitReturnPrompt, satellite = buildOrbitScene(model, Config.Orbit.Center)
+
+	-- Park the rocket at the VAB on a crawler-transporter; it rolls out to the pad later.
+	local rocketPad = rocket:GetPivot()
+	local rocketVAB = rocketPad + Vector3.new(0, 0, 90)
+	rocket:PivotTo(rocketVAB)
+	local crawler = buildCrawler(model, Vector3.new(0, 0.6, 18))
+	local crawlerVAB = crawler:GetPivot()
+	local crawlerPad = crawlerVAB + Vector3.new(0, 0, -90)
+
+	-- Ocean east of the Cape (real terrain water for the splashdown).
+	Workspace.Terrain:FillBlock(CFrame.new(Config.Ocean.Center), Config.Ocean.Size, Enum.Material.Water)
+
+	-- Re-entry capsule + parachute, parked underground until splashdown.
+	local descentRig, descentSeat = buildDescentRig(model, Config.Splashdown.Point)
+	local descentStart = CFrame.new(Config.Splashdown.Point.X, Config.Splashdown.StartHeight, Config.Splashdown.Point.Z)
+	local descentParked = CFrame.new(Config.Splashdown.Point.X, -500, Config.Splashdown.Point.Z)
+	descentRig:PivotTo(descentParked)
+
+	-- Surface world (Moon / Mars, recoloured per destination) with the deployable rover.
+	local surfaceGround, surfaceSpawn, rover, roverSeat, roverDrivePrompt, surfaceReturnPrompt =
+		buildSurface(model, Config.Surface.Center)
+
+	-- Flight-plan console near the pad to pick a destination.
+	local flightConsole = part(model, {
+		Name = "FlightConsole",
+		Size = Vector3.new(6, 3, 2),
+		Position = Vector3.new(-16, 1.5, 62),
+		Color = Color3.fromRGB(40, 44, 54),
+		Material = Enum.Material.Metal,
+	})
+	flightConsole:SetAttribute("Dest", "EarthOrbit")
+
+	local flightBillboard = Instance.new("BillboardGui")
+	flightBillboard.Name = "FlightPlan"
+	flightBillboard.Size = UDim2.new(0, 240, 0, 40)
+	flightBillboard.StudsOffsetWorldSpace = Vector3.new(0, 3, 0)
+	flightBillboard.AlwaysOnTop = true
+	flightBillboard.MaxDistance = 90
+	flightBillboard.Adornee = flightConsole
+
+	local flightLabel = Instance.new("TextLabel")
+	flightLabel.Size = UDim2.fromScale(1, 1)
+	flightLabel.BackgroundTransparency = 1
+	flightLabel.Font = Enum.Font.GothamBold
+	flightLabel.TextColor3 = Color3.fromRGB(150, 220, 255)
+	flightLabel.TextStrokeTransparency = 0.4
+	flightLabel.TextScaled = true
+	flightLabel.Text = "Destination: Earth Orbit"
+	flightLabel.Parent = flightBillboard
+	flightBillboard.Parent = flightConsole
+
+	local flightCyclePrompt = Instance.new("ProximityPrompt")
+	flightCyclePrompt.Name = "FlightCyclePrompt"
+	flightCyclePrompt.ActionText = "Change Destination"
+	flightCyclePrompt.ObjectText = "Flight Plan"
+	flightCyclePrompt.HoldDuration = 0.3
+	flightCyclePrompt.RequiresLineOfSight = false
+	flightCyclePrompt.MaxActivationDistance = 10
+	flightCyclePrompt.Parent = flightConsole
+
+	-- Rollout prompt on the VAB (assemble + roll the rocket to the pad).
+	local rolloutPrompt = Instance.new("ProximityPrompt")
+	rolloutPrompt.Name = "RolloutPrompt"
+	rolloutPrompt.ActionText = "Assemble & Roll Out Rocket"
+	rolloutPrompt.ObjectText = "Vehicle Assembly Building"
+	rolloutPrompt.HoldDuration = 0.5
+	rolloutPrompt.RequiresLineOfSight = false
+	rolloutPrompt.MaxActivationDistance = 20
+	rolloutPrompt.Parent = vab
+
+	-- Mission Control satellite-monitor screen (on the east face of the MC building).
+	local screenPart = part(model, {
+		Name = "MonitorScreen",
+		Size = Vector3.new(0.4, 7, 12),
+		Position = Vector3.new(-40.6, 8, 20),
+		Color = Color3.fromRGB(8, 10, 16),
+		Material = Enum.Material.SmoothPlastic,
+	})
+	local monitorGui = Instance.new("SurfaceGui")
+	monitorGui.Name = "Monitor"
+	monitorGui.Face = Enum.NormalId.Right
+	monitorGui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	monitorGui.PixelsPerStud = 50
+	monitorGui.Parent = screenPart
+
+	local monitorBg = Instance.new("Frame")
+	monitorBg.Size = UDim2.fromScale(1, 1)
+	monitorBg.BackgroundColor3 = Color3.fromRGB(8, 10, 16)
+	monitorBg.BorderSizePixel = 0
+	monitorBg.Parent = monitorGui
+
+	local monitorTitle = Instance.new("TextLabel")
+	monitorTitle.Size = UDim2.new(1, 0, 0, 64)
+	monitorTitle.BackgroundTransparency = 1
+	monitorTitle.Font = Enum.Font.GothamBold
+	monitorTitle.TextColor3 = Color3.fromRGB(120, 210, 255)
+	monitorTitle.TextScaled = true
+	monitorTitle.Text = "🛰️ SATELLITE MONITOR"
+	monitorTitle.Parent = monitorBg
+
+	local monitorLabel = Instance.new("TextLabel")
+	monitorLabel.Position = UDim2.new(0, 18, 0, 74)
+	monitorLabel.Size = UDim2.new(1, -36, 1, -86)
+	monitorLabel.BackgroundTransparency = 1
+	monitorLabel.Font = Enum.Font.Code
+	monitorLabel.TextColor3 = Color3.fromRGB(120, 255, 170)
+	monitorLabel.TextXAlignment = Enum.TextXAlignment.Left
+	monitorLabel.TextYAlignment = Enum.TextYAlignment.Top
+	monitorLabel.TextSize = 24
+	monitorLabel.Text = "Initializing..."
+	monitorLabel.Parent = monitorBg
+
+	return {
+		Model = model,
+		Rocket = rocket,
+		RocketSeat = seat,
+		RocketStart = rocketPad,
+		BoardPrompt = boardPrompt,
+		EngineFX = engineFX,
+		SuitStation = suitStation,
+		SuitPrompt = suitPrompt,
+		OrbitSeat = orbitSeat,
+		OrbitReturnPrompt = orbitReturnPrompt,
+		Satellite = satellite,
+		DescentRig = descentRig,
+		DescentSeat = descentSeat,
+		DescentStart = descentStart,
+		DescentParked = descentParked,
+		SurfaceGround = surfaceGround,
+		SurfaceSpawn = surfaceSpawn,
+		Rover = rover,
+		RoverSeat = roverSeat,
+		RoverDrivePrompt = roverDrivePrompt,
+		SurfaceReturnPrompt = surfaceReturnPrompt,
+		FlightConsole = flightConsole,
+		FlightLabel = flightLabel,
+		FlightCyclePrompt = flightCyclePrompt,
+		Crawler = crawler,
+		RocketVAB = rocketVAB,
+		CrawlerVAB = crawlerVAB,
+		CrawlerPad = crawlerPad,
+		RolloutPrompt = rolloutPrompt,
+		MonitorLabel = monitorLabel,
+	}
+end
+
+return WorldBuilder
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="StarterPlayer" referent="11">
+    <Properties>
+      <string name="Name">StarterPlayer</string>
+    </Properties>
+    <Item class="StarterPlayerScripts" referent="12">
+      <Properties>
+        <string name="Name">StarterPlayerScripts</string>
+      </Properties>
+      <Item class="LocalScript" referent="13">
+        <Properties>
+          <string name="Name">Client</string>
+          <string name="Source"><![CDATA[--!strict
+-- Client entry point: HUD toasts, screen fades, and launch camera shake.
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local Notifier = require(script.ui.Notifier)
+
+Notifier.init()
+
+Remotes.event("Notify").OnClientEvent:Connect(function(message: string)
+	Notifier.show(message)
+end)
+
+Remotes.event("Screen").OnClientEvent:Connect(function(action: string, duration: number)
+	Notifier.fade(action, duration)
+end)
+
+Remotes.event("Launch").OnClientEvent:Connect(function(duration: number)
+	local character = Players.LocalPlayer.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+	local elapsed = 0
+	local connection: RBXScriptConnection? = nil
+	connection = RunService.RenderStepped:Connect(function(dt: number)
+		elapsed += dt
+		if elapsed >= duration then
+			humanoid.CameraOffset = Vector3.zero
+			if connection then
+				connection:Disconnect()
+			end
+			return
+		end
+		local shake = 0.5
+		humanoid.CameraOffset = Vector3.new(
+			(math.random() - 0.5) * shake,
+			(math.random() - 0.5) * shake,
+			(math.random() - 0.5) * shake
+		)
+	end)
+end)
+
+-- Rescue button: server tells us when to show it; clicking asks for pickup.
+Remotes.event("RescuePrompt").OnClientEvent:Connect(function(show: boolean)
+	Notifier.setRescueVisible(show)
+end)
+
+Notifier.RescueClicked:Connect(function()
+	Remotes.event("Rescue"):FireServer()
+end)
+]]></string>
+        </Properties>
+        <Item class="Folder" referent="14">
+          <Properties>
+            <string name="Name">ui</string>
+          </Properties>
+          <Item class="ModuleScript" referent="15">
+            <Properties>
+              <string name="Name">Notifier</string>
+              <string name="Source"><![CDATA[--!strict
+-- HUD: server-message toasts, full-screen fades, and a small rescue button.
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+
+local Notifier = {}
+
+local label: TextLabel? = nil
+local fadeFrame: Frame? = nil
+local rescueButton: TextButton? = nil
+
+local rescueClicked = Instance.new("BindableEvent")
+Notifier.RescueClicked = rescueClicked.Event
+
+function Notifier.init()
+	local player = Players.LocalPlayer
+	local playerGui = player:WaitForChild("PlayerGui")
+
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "SpaceManHUD"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	gui.Parent = playerGui
+
+	local fade = Instance.new("Frame")
+	fade.Name = "Fade"
+	fade.Size = UDim2.fromScale(1, 1)
+	fade.BackgroundColor3 = Color3.new(0, 0, 0)
+	fade.BackgroundTransparency = 1
+	fade.BorderSizePixel = 0
+	fade.ZIndex = 10
+	fade.Parent = gui
+	fadeFrame = fade
+
+	local toast = Instance.new("TextLabel")
+	toast.Name = "Toast"
+	toast.AnchorPoint = Vector2.new(0.5, 0)
+	toast.Position = UDim2.new(0.5, 0, 0.08, 0)
+	toast.Size = UDim2.new(0, 540, 0, 50)
+	toast.BackgroundColor3 = Color3.fromRGB(15, 18, 28)
+	toast.BackgroundTransparency = 1
+	toast.TextColor3 = Color3.fromRGB(235, 240, 245)
+	toast.Font = Enum.Font.GothamMedium
+	toast.TextScaled = true
+	toast.Text = ""
+	toast.TextTransparency = 1
+	toast.ZIndex = 2
+
+	local toastCorner = Instance.new("UICorner")
+	toastCorner.CornerRadius = UDim.new(0, 10)
+	toastCorner.Parent = toast
+
+	local toastPad = Instance.new("UIPadding")
+	toastPad.PaddingLeft = UDim.new(0, 16)
+	toastPad.PaddingRight = UDim.new(0, 16)
+	toastPad.Parent = toast
+
+	toast.Parent = gui
+	label = toast
+
+	-- Small, unobtrusive action button (hidden until needed).
+	local button = Instance.new("TextButton")
+	button.Name = "RescueButton"
+	button.AnchorPoint = Vector2.new(0.5, 1)
+	button.Position = UDim2.new(0.5, 0, 0.86, 0)
+	button.Size = UDim2.new(0, 210, 0, 40)
+	button.BackgroundColor3 = Color3.fromRGB(225, 95, 60)
+	button.TextColor3 = Color3.fromRGB(255, 255, 255)
+	button.Font = Enum.Font.GothamBold
+	button.TextSize = 16
+	button.Text = "🚤 Activate Rescue Boats"
+	button.AutoButtonColor = true
+	button.Visible = false
+	button.ZIndex = 5
+
+	local buttonCorner = Instance.new("UICorner")
+	buttonCorner.CornerRadius = UDim.new(0, 8)
+	buttonCorner.Parent = button
+
+	button.Activated:Connect(function()
+		button.Visible = false
+		rescueClicked:Fire()
+	end)
+
+	button.Parent = gui
+	rescueButton = button
+end
+
+function Notifier.show(message: string)
+	local toast = label
+	if not toast then
+		return
+	end
+	toast.Text = message
+	TweenService:Create(toast, TweenInfo.new(0.2), {
+		TextTransparency = 0,
+		BackgroundTransparency = 0.2,
+	}):Play()
+
+	task.delay(3.5, function()
+		if toast.Text == message then
+			TweenService:Create(toast, TweenInfo.new(0.4), {
+				TextTransparency = 1,
+				BackgroundTransparency = 1,
+			}):Play()
+		end
+	end)
+end
+
+function Notifier.fade(action: string, duration: number)
+	local frame = fadeFrame
+	if not frame then
+		return
+	end
+	local goal = if action == "out" then 0 else 1
+	TweenService:Create(frame, TweenInfo.new(duration), { BackgroundTransparency = goal }):Play()
+end
+
+function Notifier.setRescueVisible(visible: boolean)
+	if rescueButton then
+		rescueButton.Visible = visible
+	end
+end
+
+return Notifier
+]]></string>
+            </Properties>
+          </Item>
+        </Item>
+      </Item>
+    </Item>
+  </Item>
+</roblox>

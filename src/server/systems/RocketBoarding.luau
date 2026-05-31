@@ -28,6 +28,10 @@ function RocketBoarding.start(complex: any, launchSystem: any)
 			notify:FireClient(player, "🚀 A launch is in progress — wait for the astronaut to return.")
 			return
 		end
+		if not launchSystem.isReady() then
+			notify:FireClient(player, "🚧 The rocket isn't on the pad yet — roll it out from the Vehicle Assembly Building first.")
+			return
+		end
 		seat:Sit(humanoid)
 		launchSystem.beginCountdown(player)
 	end)
