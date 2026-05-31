@@ -2483,13 +2483,15 @@ function WorldBuilder.build(): Complex
 		Material = Enum.Material.Sand,
 	})
 	-- Surrounding sea — prefer real terrain water, else a translucent part (never crashes).
+	-- Keep the terrain-water region modest — a huge fill (millions of voxels) can FREEZE
+	-- Studio when the game starts. This covers the island + splashdown with margin.
 	local terrain = Workspace:FindFirstChildOfClass("Terrain")
 	if terrain then
-		terrain:FillBlock(CFrame.new(Vector3.new(20, -10.5, -10)), Vector3.new(4000, 20, 4000), Enum.Material.Water)
+		terrain:FillBlock(CFrame.new(Vector3.new(20, -4.5, -10)), Vector3.new(1600, 8, 1400), Enum.Material.Water)
 	else
 		part(model, {
 			Name = "Sea",
-			Size = Vector3.new(4000, 8, 4000),
+			Size = Vector3.new(1600, 8, 1400),
 			Position = Vector3.new(20, -4.5, -10),
 			Color = Color3.fromRGB(28, 92, 138),
 			Material = Enum.Material.Glass,
