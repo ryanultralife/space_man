@@ -20,7 +20,34 @@ local function weld(a: BasePart, b: BasePart)
 	w.Parent = a
 end
 
+local function sparkle(character: Model)
+	local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not root then
+		return
+	end
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	emitter.Rate = 0
+	emitter.Lifetime = NumberRange.new(0.5, 1.1)
+	emitter.Speed = NumberRange.new(3, 7)
+	emitter.SpreadAngle = Vector2.new(180, 180)
+	emitter.Color = ColorSequence.new(Color3.fromRGB(140, 220, 255), Color3.fromRGB(255, 255, 255))
+	emitter.Size = NumberSequence.new(0.6)
+	emitter.LightEmission = 0.6
+	emitter.Parent = root
+	emitter:Emit(45)
+	task.delay(1.6, function()
+		emitter:Destroy()
+	end)
+end
+
 local function applySuit(character: Model)
+	-- Quick sparkle for feedback — we do NOT cover the player's own avatar/outfit.
+	sparkle(character)
+	if not Config.Suit.AddGear then
+		return
+	end
+
 	local head = character:FindFirstChild("Head") :: BasePart?
 	if head and not character:FindFirstChild("SM_Helmet") then
 		local helmet = Instance.new("Part")

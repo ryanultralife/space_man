@@ -17,6 +17,9 @@ Config.Gravity = {
 Config.CurrentWorld = "Earth"
 
 Config.Suit = {
+	-- AddGear = false: suiting up just flags you (a quick sparkle) and keeps your own
+	-- avatar/outfit. Set true if you want the game to add a helmet + life-support pack.
+	AddGear = false,
 	HelmetColor = Color3.fromRGB(235, 240, 245),
 	SuitColor = Color3.fromRGB(220, 224, 230),
 	PromptDistance = 9,
