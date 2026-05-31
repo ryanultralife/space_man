@@ -24,6 +24,10 @@ export type Complex = {
 	OrbitSeat: Seat,
 	OrbitReturnPrompt: ProximityPrompt,
 	Satellite: Model,
+	DescentRig: Model,
+	DescentSeat: Seat,
+	DescentStart: CFrame,
+	DescentParked: CFrame,
 }
 
 local CONCRETE = Color3.fromRGB(150, 150, 158)
@@ -317,6 +321,111 @@ local function buildOrbitScene(parent: Instance, center: Vector3): (Seat, Proxim
 	return orbitSeat, returnPrompt, satellite
 end
 
+local function buildDescentRig(parent: Instance, base: Vector3): (Model, Seat)
+	local bx, bz = base.X, base.Z
+	local rig = Instance.new("Model")
+	rig.Name = "DescentRig"
+
+	-- Axis-aligned root so we can re-orient the rig safely while descending.
+	local root = part(rig, {
+		Name = "Root",
+		Size = Vector3.new(1, 1, 1),
+		Transparency = 1,
+		CanCollide = false,
+		CFrame = CFrame.new(bx, base.Y + 2, bz),
+	})
+
+	vcyl(rig, "Capsule", bx, bz, base.Y + 1.5, 3, 7, Color3.fromRGB(60, 64, 72))
+	vcyl(rig, "Shield", bx, bz, base.Y + 0.2, 0.8, 7.4, Color3.fromRGB(34, 31, 29))
+	part(rig, {
+		Name = "CapsuleDome",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(7, 7, 7),
+		Position = Vector3.new(bx, base.Y + 3.9, bz),
+		Color = Color3.fromRGB(70, 74, 82),
+		Material = Enum.Material.SmoothPlastic,
+	})
+
+	local seat = Instance.new("Seat")
+	seat.Name = "DescentSeat"
+	seat.Anchored = true
+	seat.CanCollide = false
+	seat.Transparency = 1
+	seat.Size = Vector3.new(3, 1, 3)
+	seat.CFrame = CFrame.new(bx, base.Y + 2, bz)
+	seat.Parent = rig
+
+	local chute = Instance.new("Model")
+	chute.Name = "Parachute"
+	chute.Parent = rig
+
+	local canopy = part(chute, {
+		Name = "Canopy",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(46, 18, 46),
+		Position = Vector3.new(bx, base.Y + 34, bz),
+		Color = Color3.fromRGB(232, 96, 52),
+		Material = Enum.Material.SmoothPlastic,
+		CanCollide = false,
+		Transparency = 0.05,
+	})
+	canopy:SetAttribute("Vis", 0.05)
+
+	for i = 0, 5 do
+		local a = math.rad(i * 60)
+		local rim = Vector3.new(bx + math.cos(a) * 19, base.Y + 30, bz + math.sin(a) * 19)
+		local cap = Vector3.new(bx + math.cos(a) * 2.5, base.Y + 6, bz + math.sin(a) * 2.5)
+		local mid = (rim + cap) / 2
+		local line = part(chute, {
+			Name = "Line",
+			Size = Vector3.new(0.18, 0.18, (rim - cap).Magnitude),
+			Color = Color3.fromRGB(240, 240, 245),
+			CanCollide = false,
+			CFrame = CFrame.lookAt(mid, cap),
+		})
+		line:SetAttribute("Vis", 0)
+	end
+
+	rig.PrimaryPart = root
+	rig.Parent = parent
+	return rig, seat
+end
+
+function WorldBuilder.makeBoat(position: Vector3): Model
+	local boat = Instance.new("Model")
+	boat.Name = "RescueBoat"
+	local hull = part(boat, {
+		Name = "Hull",
+		Size = Vector3.new(12, 2.5, 5),
+		Position = position,
+		Color = Color3.fromRGB(185, 60, 55),
+		Material = Enum.Material.SmoothPlastic,
+	})
+	part(boat, {
+		Name = "Deck",
+		Size = Vector3.new(12, 0.4, 5),
+		Position = position + Vector3.new(0, 1.45, 0),
+		Color = Color3.fromRGB(220, 222, 228),
+	})
+	part(boat, {
+		Name = "Cabin",
+		Size = Vector3.new(4, 2.6, 4),
+		Position = position + Vector3.new(-2.5, 2.8, 0),
+		Color = Color3.fromRGB(236, 238, 244),
+	})
+	part(boat, {
+		Name = "Beacon",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(1, 1, 1),
+		Position = position + Vector3.new(-2.5, 4.3, 0),
+		Color = Color3.fromRGB(255, 90, 60),
+		Material = Enum.Material.Neon,
+	})
+	boat.PrimaryPart = hull
+	boat.Parent = Workspace
+	return boat
+end
+
 function WorldBuilder.build(): Complex
 	local model = Instance.new("Model")
 	model.Name = "SpaceMan"
@@ -407,6 +516,15 @@ function WorldBuilder.build(): Complex
 	local rocket, seat, boardPrompt, engineFX = buildRocket(model, Vector3.new(padCenter.X, 1, padCenter.Z))
 	local orbitSeat, orbitReturnPrompt, satellite = buildOrbitScene(model, Config.Orbit.Center)
 
+	-- Ocean east of the Cape (real terrain water for the splashdown).
+	Workspace.Terrain:FillBlock(CFrame.new(Config.Ocean.Center), Config.Ocean.Size, Enum.Material.Water)
+
+	-- Re-entry capsule + parachute, parked underground until splashdown.
+	local descentRig, descentSeat = buildDescentRig(model, Config.Splashdown.Point)
+	local descentStart = CFrame.new(Config.Splashdown.Point.X, Config.Splashdown.StartHeight, Config.Splashdown.Point.Z)
+	local descentParked = CFrame.new(Config.Splashdown.Point.X, -500, Config.Splashdown.Point.Z)
+	descentRig:PivotTo(descentParked)
+
 	return {
 		Model = model,
 		Rocket = rocket,
@@ -419,6 +537,10 @@ function WorldBuilder.build(): Complex
 		OrbitSeat = orbitSeat,
 		OrbitReturnPrompt = orbitReturnPrompt,
 		Satellite = satellite,
+		DescentRig = descentRig,
+		DescentSeat = descentSeat,
+		DescentStart = descentStart,
+		DescentParked = descentParked,
 	}
 end
 

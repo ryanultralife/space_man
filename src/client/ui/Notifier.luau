@@ -1,5 +1,5 @@
 --!strict
--- HUD: server-message toasts and full-screen fades (used for the orbit transition).
+-- HUD: server-message toasts, full-screen fades, and a small rescue button.
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -8,6 +8,10 @@ local Notifier = {}
 
 local label: TextLabel? = nil
 local fadeFrame: Frame? = nil
+local rescueButton: TextButton? = nil
+
+local rescueClicked = Instance.new("BindableEvent")
+Notifier.RescueClicked = rescueClicked.Event
 
 function Notifier.init()
 	local player = Players.LocalPlayer
@@ -44,17 +48,44 @@ function Notifier.init()
 	toast.TextTransparency = 1
 	toast.ZIndex = 2
 
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 10)
-	corner.Parent = toast
+	local toastCorner = Instance.new("UICorner")
+	toastCorner.CornerRadius = UDim.new(0, 10)
+	toastCorner.Parent = toast
 
-	local padding = Instance.new("UIPadding")
-	padding.PaddingLeft = UDim.new(0, 16)
-	padding.PaddingRight = UDim.new(0, 16)
-	padding.Parent = toast
+	local toastPad = Instance.new("UIPadding")
+	toastPad.PaddingLeft = UDim.new(0, 16)
+	toastPad.PaddingRight = UDim.new(0, 16)
+	toastPad.Parent = toast
 
 	toast.Parent = gui
 	label = toast
+
+	-- Small, unobtrusive action button (hidden until needed).
+	local button = Instance.new("TextButton")
+	button.Name = "RescueButton"
+	button.AnchorPoint = Vector2.new(0.5, 1)
+	button.Position = UDim2.new(0.5, 0, 0.86, 0)
+	button.Size = UDim2.new(0, 210, 0, 40)
+	button.BackgroundColor3 = Color3.fromRGB(225, 95, 60)
+	button.TextColor3 = Color3.fromRGB(255, 255, 255)
+	button.Font = Enum.Font.GothamBold
+	button.TextSize = 16
+	button.Text = "🚤 Activate Rescue Boats"
+	button.AutoButtonColor = true
+	button.Visible = false
+	button.ZIndex = 5
+
+	local buttonCorner = Instance.new("UICorner")
+	buttonCorner.CornerRadius = UDim.new(0, 8)
+	buttonCorner.Parent = button
+
+	button.Activated:Connect(function()
+		button.Visible = false
+		rescueClicked:Fire()
+	end)
+
+	button.Parent = gui
+	rescueButton = button
 end
 
 function Notifier.show(message: string)
@@ -85,6 +116,12 @@ function Notifier.fade(action: string, duration: number)
 	end
 	local goal = if action == "out" then 0 else 1
 	TweenService:Create(frame, TweenInfo.new(duration), { BackgroundTransparency = goal }):Play()
+end
+
+function Notifier.setRescueVisible(visible: boolean)
+	if rescueButton then
+		rescueButton.Visible = visible
+	end
 end
 
 return Notifier

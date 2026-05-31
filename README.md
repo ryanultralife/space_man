@@ -21,8 +21,12 @@ syncs live into Roblox Studio.
 - **Full launch → orbit sequence**: 5-second countdown, engine ignition (flame, smoke,
   light) + camera shake, an accelerating climb, stage-separation call-out, then a
   fade-to-black transition into orbit above a planet, where a **satellite deploys**.
-- **Return to Earth** prompt on the orbit capsule that brings you back to the Cape.
-- On-screen toast notifications + screen fades (client HUD).
+- **Return to Earth → splashdown**: the orbit capsule re-enters under a **parachute**,
+  descends, and **splashes down into a real ocean** (terrain water), floating instead
+  of sinking.
+- **Rescue**: a small "Activate Rescue Boats" button appears; press it and a rescue
+  boat drives out, picks you up, and brings you back to the Cape.
+- On-screen toast notifications, screen fades, and a small action button (client HUD).
 
 ## Roadmap
 
@@ -30,7 +34,7 @@ syncs live into Roblox Studio.
 2. Rocket assembly + **30s crawler rollout** from the VAB to the pad
 3. ✅ Launch & ascent → **orbit** with satellite deployment + return
 4. **Mission Control** satellite-monitoring screen
-5. Reentry + **splashdown**: float under parachute, "Activate Rescue Boats" pickup
+5. ✅ Re-entry + **splashdown**: float under parachute, small "Activate Rescue Boats" pickup
 6. New worlds: **Moon & Mars** (low gravity), rovers, surface stations
 
 > Note: while a player is in orbit the whole place switches to a starry "space"

@@ -40,4 +40,21 @@ Config.Orbit = {
 	Center = Vector3.new(0, 0, 6000),
 }
 
+Config.Splashdown = {
+	Point = Vector3.new(480, 0, -10), -- middle of the ocean, east of the Cape
+	StartHeight = 360, -- altitude the parachute descent begins from
+	FloatY = 1.5, -- where the capsule rests, half-submerged
+	DescentSeconds = 9,
+}
+
+Config.Rescue = {
+	ShoreX = 160, -- where rescue boats set off from
+	BoatSpeedSeconds = 5,
+}
+
+Config.Ocean = {
+	Center = Vector3.new(520, -20, -10),
+	Size = Vector3.new(760, 40, 520),
+}
+
 return Config

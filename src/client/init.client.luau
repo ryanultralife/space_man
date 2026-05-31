@@ -43,3 +43,12 @@ Remotes.event("Launch").OnClientEvent:Connect(function(duration: number)
 		)
 	end)
 end)
+
+-- Rescue button: server tells us when to show it; clicking asks for pickup.
+Remotes.event("RescuePrompt").OnClientEvent:Connect(function(show: boolean)
+	Notifier.setRescueVisible(show)
+end)
+
+Notifier.RescueClicked:Connect(function()
+	Remotes.event("Rescue"):FireServer()
+end)
