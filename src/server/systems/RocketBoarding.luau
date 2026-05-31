@@ -1,5 +1,6 @@
 --!strict
--- Boarding gate: the rocket's prompt only seats the player if they're suited up.
+-- Boarding gate: the rocket's prompt seats the player and kicks off the launch,
+-- but only if they're suited up and no flight is already underway.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -9,7 +10,7 @@ local RocketBoarding = {}
 
 local notify = Remotes.event("Notify")
 
-function RocketBoarding.start(complex: any)
+function RocketBoarding.start(complex: any, launchSystem: any)
 	local prompt: ProximityPrompt = complex.BoardPrompt
 	local seat: Seat = complex.RocketSeat
 
@@ -23,8 +24,12 @@ function RocketBoarding.start(complex: any)
 			notify:FireClient(player, "🚫 No suit, no launch — put on a space suit first!")
 			return
 		end
+		if launchSystem.isBusy() then
+			notify:FireClient(player, "🚀 A launch is in progress — wait for the astronaut to return.")
+			return
+		end
 		seat:Sit(humanoid)
-		notify:FireClient(player, "🚀 Boarded! Rollout & launch are coming in the next update.")
+		launchSystem.beginCountdown(player)
 	end)
 end
 

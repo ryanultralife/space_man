@@ -1,6 +1,8 @@
 --!strict
--- Client entry point. Sets up the HUD and shows server notifications.
+-- Client entry point: HUD toasts, screen fades, and launch camera shake.
 
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
@@ -8,7 +10,36 @@ local Notifier = require(script.ui.Notifier)
 
 Notifier.init()
 
-local notify = Remotes.event("Notify")
-notify.OnClientEvent:Connect(function(message: string)
+Remotes.event("Notify").OnClientEvent:Connect(function(message: string)
 	Notifier.show(message)
+end)
+
+Remotes.event("Screen").OnClientEvent:Connect(function(action: string, duration: number)
+	Notifier.fade(action, duration)
+end)
+
+Remotes.event("Launch").OnClientEvent:Connect(function(duration: number)
+	local character = Players.LocalPlayer.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+	local elapsed = 0
+	local connection: RBXScriptConnection? = nil
+	connection = RunService.RenderStepped:Connect(function(dt: number)
+		elapsed += dt
+		if elapsed >= duration then
+			humanoid.CameraOffset = Vector3.zero
+			if connection then
+				connection:Disconnect()
+			end
+			return
+		end
+		local shake = 0.5
+		humanoid.CameraOffset = Vector3.new(
+			(math.random() - 0.5) * shake,
+			(math.random() - 0.5) * shake,
+			(math.random() - 0.5) * shake
+		)
+	end)
 end)

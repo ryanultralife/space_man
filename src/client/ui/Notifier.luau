@@ -1,5 +1,5 @@
 --!strict
--- Simple on-screen toast for server messages.
+-- HUD: server-message toasts and full-screen fades (used for the orbit transition).
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -7,6 +7,7 @@ local TweenService = game:GetService("TweenService")
 local Notifier = {}
 
 local label: TextLabel? = nil
+local fadeFrame: Frame? = nil
 
 function Notifier.init()
 	local player = Players.LocalPlayer
@@ -15,8 +16,19 @@ function Notifier.init()
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "SpaceManHUD"
 	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
 	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	gui.Parent = playerGui
+
+	local fade = Instance.new("Frame")
+	fade.Name = "Fade"
+	fade.Size = UDim2.fromScale(1, 1)
+	fade.BackgroundColor3 = Color3.new(0, 0, 0)
+	fade.BackgroundTransparency = 1
+	fade.BorderSizePixel = 0
+	fade.ZIndex = 10
+	fade.Parent = gui
+	fadeFrame = fade
 
 	local toast = Instance.new("TextLabel")
 	toast.Name = "Toast"
@@ -30,6 +42,7 @@ function Notifier.init()
 	toast.TextScaled = true
 	toast.Text = ""
 	toast.TextTransparency = 1
+	toast.ZIndex = 2
 
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0, 10)
@@ -63,6 +76,15 @@ function Notifier.show(message: string)
 			}):Play()
 		end
 	end)
+end
+
+function Notifier.fade(action: string, duration: number)
+	local frame = fadeFrame
+	if not frame then
+		return
+	end
+	local goal = if action == "out" then 0 else 1
+	TweenService:Create(frame, TweenInfo.new(duration), { BackgroundTransparency = goal }):Play()
 end
 
 return Notifier

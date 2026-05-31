@@ -12,21 +12,30 @@ syncs live into Roblox Studio.
 ## What works now
 
 - A compact **launch complex** generated from code: Mission Control, Vehicle Assembly
-  Building, crawlerway, launch pad + service tower, and a rocket.
-- **Suit-up gate** — walk to the Suit Station and hold the prompt to put on a space
-  suit (a helmet + life-support pack appear on your avatar).
-- **Boarding gate** — the rocket's "Enter Rocket" prompt only seats you once you're
-  suited up; otherwise it tells you to suit up first.
-- On-screen toast notifications (client HUD).
+  Building, crawlerway, launch pad + service tower.
+- An original **two-stage orbital rocket**: first stage with an engine cluster, base
+  fins and grid fins, an interstage, a second stage, and a tapered payload fairing.
+- **Suit-up gate** — hold the Suit Station prompt to put on a space suit (helmet +
+  life-support pack appear on your avatar).
+- **Boarding gate** — the rocket only lets you board once you're suited up.
+- **Full launch → orbit sequence**: 5-second countdown, engine ignition (flame, smoke,
+  light) + camera shake, an accelerating climb, stage-separation call-out, then a
+  fade-to-black transition into orbit above a planet, where a **satellite deploys**.
+- **Return to Earth** prompt on the orbit capsule that brings you back to the Cape.
+- On-screen toast notifications + screen fades (client HUD).
 
 ## Roadmap
 
 1. ✅ Launch complex + suit-up gate + boarding gate
 2. Rocket assembly + **30s crawler rollout** from the VAB to the pad
-3. Launch & ascent → **orbit** (Earth) with satellite deployment
+3. ✅ Launch & ascent → **orbit** with satellite deployment + return
 4. **Mission Control** satellite-monitoring screen
 5. Reentry + **splashdown**: float under parachute, "Activate Rescue Boats" pickup
 6. New worlds: **Moon & Mars** (low gravity), rovers, surface stations
+
+> Note: while a player is in orbit the whole place switches to a starry "space"
+> lighting (it's global for now). Multiplayer worlds will move to separate Roblox
+> places in a later milestone.
 
 ## Project layout
 
@@ -38,9 +47,10 @@ src/
 ├── server/
 │   ├── init.server.luau
 │   └── systems/
-│       ├── WorldBuilder.luau    # builds the launch complex from Parts
+│       ├── WorldBuilder.luau    # builds the launch complex, rocket, and orbit scene
 │       ├── SuitSystem.luau      # suit-up prompt + avatar suit visuals
-│       └── RocketBoarding.luau  # boarding gated on having a suit
+│       ├── RocketBoarding.luau  # boarding gated on having a suit
+│       └── LaunchSystem.luau    # countdown → ascent → orbit → satellite → return
 └── client/
     ├── init.client.luau
     └── ui/

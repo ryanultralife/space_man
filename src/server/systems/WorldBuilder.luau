@@ -1,7 +1,9 @@
 --!strict
--- Builds a compact launch complex out of Parts at runtime, so the whole
--- environment lives in version control. Swap these placeholders for nicer
--- models in Studio later — the systems only need the named references back.
+-- Builds the launch complex AND the orbit scene out of Parts at runtime, so the
+-- whole environment lives in version control. The rocket is an original two-stage
+-- orbital design (engine cluster, grid fins, interstage, second stage, fairing).
+-- Swap these placeholders for nicer models in Studio later — systems only need the
+-- named references back.
 
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14,14 +16,21 @@ export type Complex = {
 	Model: Model,
 	Rocket: Model,
 	RocketSeat: Seat,
+	RocketStart: CFrame,
 	BoardPrompt: ProximityPrompt,
+	EngineFX: BasePart,
 	SuitStation: BasePart,
 	SuitPrompt: ProximityPrompt,
+	OrbitSeat: Seat,
+	OrbitReturnPrompt: ProximityPrompt,
+	Satellite: Model,
 }
 
 local CONCRETE = Color3.fromRGB(150, 150, 158)
 local WHITE = Color3.fromRGB(240, 242, 248)
 local DARK = Color3.fromRGB(45, 48, 58)
+local GREY = Color3.fromRGB(90, 92, 100)
+local NOZZLE = Color3.fromRGB(70, 72, 80)
 local ACCENT = Color3.fromRGB(70, 130, 220)
 
 local function part(parent: Instance, props: { [string]: any }): Part
@@ -36,13 +45,35 @@ local function part(parent: Instance, props: { [string]: any }): Part
 	return p
 end
 
+-- Vertical cylinder (Roblox cylinders run along their X axis, so we stand them up).
+local function vcyl(parent: Instance, name: string, x: number, z: number, y: number, height: number, dia: number, color: Color3, material: Enum.Material?): Part
+	return part(parent, {
+		Name = name,
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(height, dia, dia),
+		Color = color,
+		Material = material or Enum.Material.SmoothPlastic,
+		CFrame = CFrame.new(x, y, z) * CFrame.Angles(0, 0, math.rad(90)),
+	})
+end
+
+local function block(parent: Instance, name: string, cframe: CFrame, size: Vector3, color: Color3, material: Enum.Material?): Part
+	return part(parent, {
+		Name = name,
+		Size = size,
+		Color = color,
+		Material = material or Enum.Material.SmoothPlastic,
+		CFrame = cframe,
+	})
+end
+
 local function nameTag(adornee: BasePart, text: string, height: number)
 	local bb = Instance.new("BillboardGui")
 	bb.Name = "NameTag"
 	bb.Size = UDim2.new(0, 280, 0, 54)
 	bb.StudsOffsetWorldSpace = Vector3.new(0, height, 0)
 	bb.AlwaysOnTop = true
-	bb.MaxDistance = 500
+	bb.MaxDistance = 600
 
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.fromScale(1, 1)
@@ -58,76 +89,237 @@ local function nameTag(adornee: BasePart, text: string, height: number)
 	bb.Parent = adornee
 end
 
-local function buildRocket(parent: Instance, base: Vector3): (Model, Seat, ProximityPrompt)
+local function buildRocket(parent: Instance, base: Vector3): (Model, Seat, ProximityPrompt, BasePart)
+	local bx, bz = base.X, base.Z
 	local rocket = Instance.new("Model")
 	rocket.Name = "Rocket"
 
-	local bodyHeight = 24
-	local body = part(rocket, {
-		Name = "Body",
-		Shape = Enum.PartType.Cylinder,
-		Size = Vector3.new(bodyHeight, 6, 6),
-		Color = WHITE,
-		Material = Enum.Material.SmoothPlastic,
-		CFrame = CFrame.new(base.X, base.Y + bodyHeight / 2, base.Z) * CFrame.Angles(0, 0, math.rad(90)),
-	})
+	-- First stage + engine skirt + accent stripe
+	vcyl(rocket, "Stage1", bx, bz, base.Y + 16, 30, 7, WHITE)
+	vcyl(rocket, "EngineSkirt", bx, bz, base.Y + 2.5, 3, 7.3, DARK)
+	vcyl(rocket, "Stripe", bx, bz, base.Y + 23, 1.5, 7.12, ACCENT)
 
-	part(rocket, {
-		Name = "Band",
-		Shape = Enum.PartType.Cylinder,
-		Size = Vector3.new(1.4, 6.3, 6.3),
-		Color = DARK,
-		Material = Enum.Material.SmoothPlastic,
-		CFrame = CFrame.new(base.X, base.Y + 6, base.Z) * CFrame.Angles(0, 0, math.rad(90)),
-	})
-
-	part(rocket, {
-		Name = "Nose",
-		Shape = Enum.PartType.Ball,
-		Size = Vector3.new(6, 6, 6),
-		Color = WHITE,
-		Material = Enum.Material.SmoothPlastic,
-		CFrame = CFrame.new(base.X, base.Y + bodyHeight, base.Z),
-	})
-
+	-- Engine nozzles (centre + ring of four)
+	vcyl(rocket, "Nozzle", bx, bz, base.Y + 2.2, 2.4, 1.8, NOZZLE)
 	for i = 0, 3 do
-		local angle = math.rad(i * 90)
-		part(rocket, {
-			Name = "Fin",
-			Size = Vector3.new(1, 5, 3),
-			Color = ACCENT,
-			Material = Enum.Material.SmoothPlastic,
-			CFrame = CFrame.new(base.X + math.cos(angle) * 3.2, base.Y + 2.5, base.Z + math.sin(angle) * 3.2)
-				* CFrame.Angles(0, -angle, 0),
-		})
+		local a = math.rad(i * 90)
+		vcyl(rocket, "Nozzle", bx + math.cos(a) * 2, bz + math.sin(a) * 2, base.Y + 2.2, 2.4, 1.6, NOZZLE)
 	end
 
+	-- Base fins
+	for i = 0, 3 do
+		local a = math.rad(i * 90)
+		block(rocket, "Fin", CFrame.new(bx + math.cos(a) * 3.6, base.Y + 4.5, bz + math.sin(a) * 3.6) * CFrame.Angles(0, -a, 0), Vector3.new(0.6, 7, 3), DARK)
+	end
+
+	-- Grid fins near the top of the first stage
+	for i = 0, 3 do
+		local a = math.rad(i * 90 + 45)
+		block(rocket, "GridFin", CFrame.new(bx + math.cos(a) * 3.8, base.Y + 26, bz + math.sin(a) * 3.8) * CFrame.Angles(0, -a, 0), Vector3.new(0.3, 2.6, 2.6), GREY)
+	end
+
+	-- Interstage + second stage
+	vcyl(rocket, "Interstage", bx, bz, base.Y + 32, 2, 7, DARK)
+	vcyl(rocket, "Stage2", bx, bz, base.Y + 39, 12, 6.4, WHITE)
+
+	-- Tapered payload fairing + nose tip
+	vcyl(rocket, "Fairing", bx, bz, base.Y + 46.5, 3, 6, WHITE)
+	vcyl(rocket, "Fairing", bx, bz, base.Y + 49, 2.5, 4.5, WHITE)
+	vcyl(rocket, "Fairing", bx, bz, base.Y + 51, 1.5, 3, WHITE)
+	part(rocket, {
+		Name = "Tip",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(3, 3, 3),
+		Color = WHITE,
+		Material = Enum.Material.SmoothPlastic,
+		CFrame = CFrame.new(bx, base.Y + 52.2, bz),
+	})
+
+	-- Capsule window
+	block(rocket, "Window", CFrame.new(bx, base.Y + 39, bz + 3.25), Vector3.new(1.4, 1.4, 0.25), Color3.fromRGB(40, 60, 95))
+
+	-- Pilot seat, up inside the capsule
 	local seat = Instance.new("Seat")
 	seat.Name = "PilotSeat"
 	seat.Anchored = true
 	seat.CanCollide = false
 	seat.Transparency = 1
 	seat.Size = Vector3.new(3, 1, 3)
-	seat.CFrame = CFrame.new(base.X, base.Y + 5, base.Z)
+	seat.CFrame = CFrame.new(bx, base.Y + 38, bz)
 	seat.Parent = rocket
 
-	local prompt = Instance.new("ProximityPrompt")
-	prompt.Name = "BoardPrompt"
-	prompt.ActionText = "Enter Rocket"
-	prompt.ObjectText = "Rocket"
-	prompt.HoldDuration = 0.5
-	prompt.RequiresLineOfSight = false
-	prompt.MaxActivationDistance = Config.Rocket.PromptDistance
-	prompt.Parent = body
+	-- Boarding prompt down at the base where players walk up
+	local skirt = rocket:FindFirstChild("EngineSkirt") :: BasePart
+	local boardPrompt = Instance.new("ProximityPrompt")
+	boardPrompt.Name = "BoardPrompt"
+	boardPrompt.ActionText = "Enter Rocket"
+	boardPrompt.ObjectText = "Rocket"
+	boardPrompt.HoldDuration = 0.5
+	boardPrompt.RequiresLineOfSight = false
+	boardPrompt.MaxActivationDistance = Config.Rocket.PromptDistance
+	boardPrompt.Parent = skirt
 
-	rocket.PrimaryPart = body
+	-- Engine effects host at the very base
+	local engineFX = part(rocket, {
+		Name = "EngineFX",
+		Size = Vector3.new(1, 1, 1),
+		Transparency = 1,
+		CanCollide = false,
+		CFrame = CFrame.new(bx, base.Y + 0.6, bz),
+	})
+
+	local flame = Instance.new("ParticleEmitter")
+	flame.Name = "Flame"
+	flame.Enabled = false
+	flame.EmissionDirection = Enum.NormalId.Bottom
+	flame.Rate = 140
+	flame.Lifetime = NumberRange.new(0.3, 0.7)
+	flame.Speed = NumberRange.new(25, 45)
+	flame.SpreadAngle = Vector2.new(12, 12)
+	flame.LightEmission = 1
+	flame.Color = ColorSequence.new(Color3.fromRGB(255, 190, 70), Color3.fromRGB(255, 90, 25))
+	flame.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 2), NumberSequenceKeypoint.new(1, 6) })
+	flame.Parent = engineFX
+
+	local smoke = Instance.new("ParticleEmitter")
+	smoke.Name = "Smoke"
+	smoke.Enabled = false
+	smoke.EmissionDirection = Enum.NormalId.Bottom
+	smoke.Rate = 70
+	smoke.Lifetime = NumberRange.new(1, 2)
+	smoke.Speed = NumberRange.new(12, 22)
+	smoke.SpreadAngle = Vector2.new(25, 25)
+	smoke.Color = ColorSequence.new(Color3.fromRGB(225, 225, 225))
+	smoke.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 4), NumberSequenceKeypoint.new(1, 11) })
+	smoke.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.25), NumberSequenceKeypoint.new(1, 1) })
+	smoke.Parent = engineFX
+
+	local light = Instance.new("PointLight")
+	light.Name = "EngineLight"
+	light.Enabled = false
+	light.Brightness = 6
+	light.Range = 32
+	light.Color = Color3.fromRGB(255, 170, 80)
+	light.Parent = engineFX
+
+	rocket.PrimaryPart = rocket:FindFirstChild("Stage1") :: BasePart
 	rocket.Parent = parent
-	return rocket, seat, prompt
+	return rocket, seat, boardPrompt, engineFX
+end
+
+local function buildOrbitScene(parent: Instance, center: Vector3): (Seat, ProximityPrompt, Model)
+	local cx, cy, cz = center.X, center.Y, center.Z
+	local earthCenter = Vector3.new(cx, cy - 520, cz)
+
+	part(parent, {
+		Name = "Earth",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(700, 700, 700),
+		Position = earthCenter,
+		Color = Color3.fromRGB(38, 86, 162),
+		Material = Enum.Material.SmoothPlastic,
+	})
+	part(parent, {
+		Name = "Atmosphere",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(744, 744, 744),
+		Position = earthCenter,
+		Color = Color3.fromRGB(135, 180, 255),
+		Material = Enum.Material.SmoothPlastic,
+		Transparency = 0.62,
+		CanCollide = false,
+	})
+
+	local dirs = {
+		Vector3.new(1, 0.35, 0.2),
+		Vector3.new(-0.6, 0.5, 0.5),
+		Vector3.new(0.2, -0.45, 0.85),
+		Vector3.new(-0.35, -0.6, -0.55),
+		Vector3.new(0.55, 0.25, -0.75),
+	}
+	for i, d in dirs do
+		local size = 150 + i * 12
+		part(parent, {
+			Name = "Continent",
+			Shape = Enum.PartType.Ball,
+			Size = Vector3.new(size, size, size),
+			Position = earthCenter + d.Unit * 330,
+			Color = Color3.fromRGB(72, 148, 84),
+			Material = Enum.Material.SmoothPlastic,
+			CanCollide = false,
+		})
+	end
+
+	-- Re-entry capsule the player rides in orbit
+	vcyl(parent, "Capsule", cx, cz, cy, 3, 7, Color3.fromRGB(205, 210, 218))
+	part(parent, {
+		Name = "CapsuleDome",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(7, 7, 7),
+		Position = Vector3.new(cx, cy + 2.4, cz),
+		Color = Color3.fromRGB(205, 210, 218),
+		Material = Enum.Material.SmoothPlastic,
+	})
+
+	local orbitSeat = Instance.new("Seat")
+	orbitSeat.Name = "OrbitSeat"
+	orbitSeat.Anchored = true
+	orbitSeat.CanCollide = false
+	orbitSeat.Transparency = 1
+	orbitSeat.Size = Vector3.new(3, 1, 3)
+	orbitSeat.CFrame = CFrame.new(cx, cy + 0.5, cz)
+	orbitSeat.Parent = parent
+
+	local capsulePart = parent:FindFirstChild("Capsule") :: BasePart
+	local returnPrompt = Instance.new("ProximityPrompt")
+	returnPrompt.Name = "OrbitReturnPrompt"
+	returnPrompt.ActionText = "Return to Earth"
+	returnPrompt.ObjectText = "Re-entry Capsule"
+	returnPrompt.HoldDuration = 1
+	returnPrompt.RequiresLineOfSight = false
+	returnPrompt.MaxActivationDistance = 18
+	returnPrompt.Parent = capsulePart
+
+	-- Satellite to deploy
+	local satellite = Instance.new("Model")
+	satellite.Name = "Satellite"
+	local satPos = Vector3.new(cx + 26, cy + 5, cz)
+	local satBody = part(satellite, {
+		Name = "Body",
+		Size = Vector3.new(3, 3, 4),
+		Position = satPos,
+		Color = Color3.fromRGB(188, 194, 205),
+		Material = Enum.Material.Metal,
+	})
+	part(satellite, {
+		Name = "Panel",
+		Size = Vector3.new(10, 0.2, 4),
+		Position = satPos + Vector3.new(6.5, 0, 0),
+		Color = Color3.fromRGB(40, 60, 120),
+	})
+	part(satellite, {
+		Name = "Panel",
+		Size = Vector3.new(10, 0.2, 4),
+		Position = satPos - Vector3.new(6.5, 0, 0),
+		Color = Color3.fromRGB(40, 60, 120),
+	})
+	vcyl(satellite, "Mast", satPos.X, satPos.Z, satPos.Y + 3.2, 3, 0.4, GREY)
+	part(satellite, {
+		Name = "Dish",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(2.4, 2.4, 2.4),
+		Position = satPos + Vector3.new(0, 4.6, 0),
+		Color = Color3.fromRGB(220, 222, 228),
+	})
+	satellite.PrimaryPart = satBody
+	satellite.Parent = parent
+
+	return orbitSeat, returnPrompt, satellite
 end
 
 function WorldBuilder.build(): Complex
 	local model = Instance.new("Model")
-	model.Name = "LaunchComplex"
+	model.Name = "SpaceMan"
 	model.Parent = Workspace
 
 	part(model, {
@@ -142,7 +334,7 @@ function WorldBuilder.build(): Complex
 	spawnPad.Name = "Spawn"
 	spawnPad.Anchored = true
 	spawnPad.Size = Vector3.new(10, 1, 10)
-	spawnPad.Position = Vector3.new(0, 0.5, 90)
+	spawnPad.Position = Vector3.new(0, 0.5, 74)
 	spawnPad.Color = CONCRETE
 	spawnPad.Material = Enum.Material.Concrete
 	spawnPad.Neutral = true
@@ -152,7 +344,7 @@ function WorldBuilder.build(): Complex
 	local suitStation = part(model, {
 		Name = "SuitStation",
 		Size = Vector3.new(8, 4, 8),
-		Position = Vector3.new(16, 2, 74),
+		Position = Vector3.new(16, 2, 62),
 		Color = ACCENT,
 		Material = Enum.Material.Metal,
 	})
@@ -212,15 +404,21 @@ function WorldBuilder.build(): Complex
 		})
 	end
 
-	local rocket, seat, boardPrompt = buildRocket(model, Vector3.new(padCenter.X, 1, padCenter.Z))
+	local rocket, seat, boardPrompt, engineFX = buildRocket(model, Vector3.new(padCenter.X, 1, padCenter.Z))
+	local orbitSeat, orbitReturnPrompt, satellite = buildOrbitScene(model, Config.Orbit.Center)
 
 	return {
 		Model = model,
 		Rocket = rocket,
 		RocketSeat = seat,
+		RocketStart = rocket:GetPivot(),
 		BoardPrompt = boardPrompt,
+		EngineFX = engineFX,
 		SuitStation = suitStation,
 		SuitPrompt = suitPrompt,
+		OrbitSeat = orbitSeat,
+		OrbitReturnPrompt = orbitReturnPrompt,
+		Satellite = satellite,
 	}
 end
 

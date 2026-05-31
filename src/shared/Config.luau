@@ -28,4 +28,16 @@ Config.Rocket = {
 	PromptDistance = 11,
 }
 
+Config.Launch = {
+	CountdownFrom = 5,
+	AscentSeconds = 7,
+	AscentHeight = 260,
+	FadeSeconds = 0.7,
+}
+
+Config.Orbit = {
+	-- Where the orbit scene lives (far from the launch site; we relocate the player here).
+	Center = Vector3.new(0, 0, 6000),
+}
+
 return Config
