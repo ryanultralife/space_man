@@ -865,8 +865,21 @@ function WorldBuilder.build(): Complex
 	local crawlerVAB = crawler:GetPivot()
 	local crawlerPad = crawlerVAB + Vector3.new(0, 0, -90)
 
-	-- Ocean east of the Cape (real terrain water for the splashdown).
-	Workspace.Terrain:FillBlock(CFrame.new(Config.Ocean.Center), Config.Ocean.Size, Enum.Material.Water)
+	-- Ocean east of the Cape. Prefer real terrain water; fall back to a water-coloured
+	-- part if the place has no Terrain object (so this can never crash the build).
+	local terrain = Workspace:FindFirstChildOfClass("Terrain")
+	if terrain then
+		terrain:FillBlock(CFrame.new(Config.Ocean.Center), Config.Ocean.Size, Enum.Material.Water)
+	else
+		part(model, {
+			Name = "Ocean",
+			Size = Vector3.new(Config.Ocean.Size.X, 2, Config.Ocean.Size.Z),
+			Position = Config.Ocean.Center + Vector3.new(0, 19, 0),
+			Color = Color3.fromRGB(40, 96, 150),
+			Material = Enum.Material.Glass,
+			Transparency = 0.25,
+		})
+	end
 
 	-- Re-entry capsule + parachute, parked underground until splashdown.
 	local descentRig, descentSeat = buildDescentRig(model, Config.Splashdown.Point)
