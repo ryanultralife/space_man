@@ -1,6 +1,7 @@
 --!strict
--- Boarding gate: the rocket's prompt seats the player and kicks off the launch,
--- but only if they're suited up and no flight is already underway.
+-- Crew boarding, the realistic way: ride the service-tower elevator up to the access
+-- arm, then enter the capsule hatch to launch. Gated on being suited up with the
+-- rocket out on the pad.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -9,19 +10,40 @@ local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local RocketBoarding = {}
 
 local notify = Remotes.event("Notify")
+local screen = Remotes.event("Screen")
 
 function RocketBoarding.start(complex: any, launchSystem: any)
-	local prompt: ProximityPrompt = complex.BoardPrompt
-	local seat: Seat = complex.RocketSeat
+	-- Crew elevator: ride up to the access arm.
+	complex.ElevatorPrompt.Triggered:Connect(function(player: Player)
+		local character = player.Character
+		local hrp = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if not hrp then
+			return
+		end
+		if not player:GetAttribute("HasSuit") then
+			notify:FireClient(player, "🚫 Put on a space suit first (the Suit-Up Room).")
+			return
+		end
+		if not launchSystem.isReady() then
+			notify:FireClient(player, "🚧 Roll the rocket out to the pad first (at the VAB).")
+			return
+		end
+		screen:FireClient(player, "out", 0.5)
+		task.wait(0.6)
+		hrp.CFrame = complex.CrewArmTop
+		screen:FireClient(player, "in", 0.5)
+		notify:FireClient(player, "🛗 Up top! Cross the access arm and enter the capsule.")
+	end)
 
-	prompt.Triggered:Connect(function(player: Player)
+	-- Capsule hatch: enter + launch.
+	complex.BoardPrompt.Triggered:Connect(function(player: Player)
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if not humanoid then
 			return
 		end
 		if not player:GetAttribute("HasSuit") then
-			notify:FireClient(player, "🚫 No suit, no launch — put on a space suit first!")
+			notify:FireClient(player, "🚫 No suit, no launch — visit the Suit-Up Room first!")
 			return
 		end
 		if launchSystem.isBusy() then
@@ -29,10 +51,10 @@ function RocketBoarding.start(complex: any, launchSystem: any)
 			return
 		end
 		if not launchSystem.isReady() then
-			notify:FireClient(player, "🚧 The rocket isn't on the pad yet — roll it out from the Vehicle Assembly Building first.")
+			notify:FireClient(player, "🚧 The rocket isn't on the pad yet — roll it out from the VAB.")
 			return
 		end
-		seat:Sit(humanoid)
+		complex.RocketSeat:Sit(humanoid)
 		launchSystem.beginCountdown(player)
 	end)
 end

@@ -55,6 +55,8 @@ export type Complex = {
 	PayloadPrompt: ProximityPrompt,
 	BuildLabel: TextLabel,
 	TelemetryLabel: TextLabel,
+	ElevatorPrompt: ProximityPrompt,
+	CrewArmTop: CFrame,
 }
 
 local CONCRETE = Color3.fromRGB(150, 150, 158)
@@ -96,6 +98,25 @@ local function block(parent: Instance, name: string, cframe: CFrame, size: Vecto
 		Material = material or Enum.Material.SmoothPlastic,
 		CFrame = cframe,
 	})
+end
+
+-- Hollow, enterable building: floor, roof, 3 solid walls, and a 4th wall with a
+-- doorway gap. doorFacing = 1 puts the door on the +Z side, -1 on the -Z side.
+local function buildHall(parent: Instance, name: string, center: Vector3, size: Vector3, color: Color3, material: Enum.Material, doorW: number, doorH: number, doorFacing: number)
+	local hw, hh, hd = size.X / 2, size.Y / 2, size.Z / 2
+	local t = 1
+	part(parent, { Name = name .. "Floor", Size = Vector3.new(size.X, t, size.Z), Position = center + Vector3.new(0, -hh + t / 2, 0), Color = color, Material = material })
+	part(parent, { Name = name .. "Roof", Size = Vector3.new(size.X, t, size.Z), Position = center + Vector3.new(0, hh - t / 2, 0), Color = color, Material = material })
+	part(parent, { Name = name .. "Wall", Size = Vector3.new(t, size.Y, size.Z), Position = center + Vector3.new(-hw + t / 2, 0, 0), Color = color, Material = material })
+	part(parent, { Name = name .. "Wall", Size = Vector3.new(t, size.Y, size.Z), Position = center + Vector3.new(hw - t / 2, 0, 0), Color = color, Material = material })
+	-- Solid wall opposite the door.
+	part(parent, { Name = name .. "Wall", Size = Vector3.new(size.X, size.Y, t), Position = center + Vector3.new(0, 0, -doorFacing * (hd - t / 2)), Color = color, Material = material })
+	-- Door wall: two side segments + a lintel over the gap.
+	local sideW = (size.X - doorW) / 2
+	local doorZ = center.Z + doorFacing * (hd - t / 2)
+	part(parent, { Name = name .. "Wall", Size = Vector3.new(sideW, size.Y, t), Position = Vector3.new(center.X - (doorW / 2 + sideW / 2), center.Y, doorZ), Color = color, Material = material })
+	part(parent, { Name = name .. "Wall", Size = Vector3.new(sideW, size.Y, t), Position = Vector3.new(center.X + (doorW / 2 + sideW / 2), center.Y, doorZ), Color = color, Material = material })
+	part(parent, { Name = name .. "Lintel", Size = Vector3.new(doorW, size.Y - doorH, t), Position = Vector3.new(center.X, center.Y + hh - (size.Y - doorH) / 2, doorZ), Color = color, Material = material })
 end
 
 local function nameTag(adornee: BasePart, text: string, height: number)
@@ -151,62 +172,53 @@ local function buildRocket(parent: Instance, base: Vector3): (Model, Seat, Proxi
 
 	-- Interstage + second stage
 	vcyl(rocket, "Interstage", bx, bz, base.Y + 32, 2, 7, DARK)
-	vcyl(rocket, "Stage2", bx, bz, base.Y + 39, 12, 6.4, WHITE)
+	vcyl(rocket, "Stage2", bx, bz, base.Y + 38, 10, 6.4, WHITE)
 
-	-- Tapered payload fairing (semi-transparent so the rover payload shows) + nose tip
-	local f1 = vcyl(rocket, "Fairing", bx, bz, base.Y + 46.5, 3, 6, WHITE)
-	local f2 = vcyl(rocket, "Fairing", bx, bz, base.Y + 49, 2.5, 4.5, WHITE)
-	local f3 = vcyl(rocket, "Fairing", bx, bz, base.Y + 51, 1.5, 3, WHITE)
-	f1.Transparency = 0.3
-	f2.Transparency = 0.3
-	f3.Transparency = 0.3
+	-- Crew capsule on top (you ride inside it), with a side hatch + launch-escape spire.
+	vcyl(rocket, "CrewCapsule", bx, bz, base.Y + 44, 4, 6.5, Color3.fromRGB(235, 238, 244))
 	part(rocket, {
-		Name = "Tip",
+		Name = "CapsuleDome",
 		Shape = Enum.PartType.Ball,
-		Size = Vector3.new(3, 3, 3),
-		Color = WHITE,
+		Size = Vector3.new(6.5, 6.5, 6.5),
+		Color = Color3.fromRGB(235, 238, 244),
 		Material = Enum.Material.SmoothPlastic,
-		CFrame = CFrame.new(bx, base.Y + 52.2, bz),
+		CFrame = CFrame.new(bx, base.Y + 47.5, bz),
 	})
+	part(rocket, {
+		Name = "CapsuleWindow",
+		Size = Vector3.new(0.3, 1.6, 1.6),
+		Color = Color3.fromRGB(40, 60, 95),
+		Material = Enum.Material.Glass,
+		CFrame = CFrame.new(bx + 3.3, base.Y + 45, bz),
+	})
+	local hatch = part(rocket, {
+		Name = "Hatch",
+		Size = Vector3.new(0.4, 3.2, 3.2),
+		Color = Color3.fromRGB(120, 140, 170),
+		Material = Enum.Material.Metal,
+		CFrame = CFrame.new(bx - 3.3, base.Y + 44, bz),
+	})
+	vcyl(rocket, "EscapeTower", bx, bz, base.Y + 52, 7, 0.8, Color3.fromRGB(200, 80, 60))
 
-	-- Stowed rover payload sitting in the top of the rocket (the one you deploy on the surface)
-	block(rocket, "PayloadDeck", CFrame.new(bx, base.Y + 45.4, bz), Vector3.new(4.2, 0.4, 4.2), Color3.fromRGB(60, 63, 72))
-	block(rocket, "PayloadRover", CFrame.new(bx, base.Y + 46.5, bz), Vector3.new(3.4, 1.6, 3.6), Color3.fromRGB(220, 200, 80))
-	for i = 0, 3 do
-		local wx = if i % 2 == 0 then 1.4 else -1.4
-		local wz = if i < 2 then 1.4 else -1.4
-		part(rocket, {
-			Name = "PayloadWheel",
-			Shape = Enum.PartType.Cylinder,
-			Size = Vector3.new(0.7, 1.4, 1.4),
-			Color = Color3.fromRGB(40, 42, 48),
-			CFrame = CFrame.new(bx + wx, base.Y + 45.9, bz + wz),
-		})
-	end
-
-	-- Capsule window
-	block(rocket, "Window", CFrame.new(bx, base.Y + 39, bz + 3.25), Vector3.new(1.4, 1.4, 0.25), Color3.fromRGB(40, 60, 95))
-
-	-- Pilot seat, up inside the capsule
+	-- Pilot seat inside the capsule.
 	local seat = Instance.new("Seat")
 	seat.Name = "PilotSeat"
 	seat.Anchored = true
 	seat.CanCollide = false
 	seat.Transparency = 1
 	seat.Size = Vector3.new(3, 1, 3)
-	seat.CFrame = CFrame.new(bx, base.Y + 38, bz)
+	seat.CFrame = CFrame.new(bx, base.Y + 44, bz)
 	seat.Parent = rocket
 
-	-- Boarding prompt down at the base where players walk up
-	local skirt = rocket:FindFirstChild("EngineSkirt") :: BasePart
+	-- "Enter Capsule" hatch prompt (reached from the crew access arm).
 	local boardPrompt = Instance.new("ProximityPrompt")
 	boardPrompt.Name = "BoardPrompt"
-	boardPrompt.ActionText = "Enter Rocket"
-	boardPrompt.ObjectText = "Rocket"
+	boardPrompt.ActionText = "Enter Capsule"
+	boardPrompt.ObjectText = "Crew Capsule"
 	boardPrompt.HoldDuration = 0.5
 	boardPrompt.RequiresLineOfSight = false
-	boardPrompt.MaxActivationDistance = Config.Rocket.PromptDistance
-	boardPrompt.Parent = skirt
+	boardPrompt.MaxActivationDistance = 10
+	boardPrompt.Parent = hatch
 
 	-- Engine effects host at the very base
 	local engineFX = part(rocket, {
@@ -304,9 +316,9 @@ function WorldBuilder.applyRocketBuild(rocket: Model)
 	end
 
 	local payload = rocket:GetAttribute("Payload") or "Rover"
-	local pr = rocket:FindFirstChild("PayloadRover") :: BasePart?
-	if pr then
-		pr.Color = if payload == "Satellite"
+	local cap = rocket:FindFirstChild("CrewCapsule") :: BasePart?
+	if cap then
+		cap.Color = if payload == "Satellite"
 			then Color3.fromRGB(188, 194, 205)
 			elseif payload == "Crew" then Color3.fromRGB(235, 238, 244)
 			else Color3.fromRGB(220, 200, 80)
@@ -852,30 +864,24 @@ function WorldBuilder.build(): Complex
 
 	-- Ground + spawn are static in the place (see default.project.json) so they show
 	-- in Studio's Edit view too; the rest of the complex is generated here on Play.
-	-- Crew suit-up building (a real complex has a crew quarters / suit room you enter).
+	-- Suit-up room (enterable). Walk in the front door and use the console to suit up.
+	local suitCenter = Vector3.new(20, 6, 64)
+	buildHall(model, "Suit", suitCenter, Vector3.new(16, 12, 12), Color3.fromRGB(214, 217, 224), Enum.Material.Concrete, 5, 8, 1)
 	local suitStation = part(model, {
 		Name = "SuitStation",
-		Size = Vector3.new(16, 12, 12),
-		Position = Vector3.new(20, 6, 64),
-		Color = Color3.fromRGB(214, 217, 224),
-		Material = Enum.Material.Concrete,
-	})
-	part(model, {
-		Name = "SuitRoof",
 		Size = Vector3.new(18, 1, 14),
-		Position = Vector3.new(20, 12.5, 64),
+		Position = suitCenter + Vector3.new(0, 6.5, 0),
 		Color = ACCENT,
 		Material = Enum.Material.Metal,
 	})
-	local suitDoor = part(model, {
-		Name = "SuitDoor",
-		Size = Vector3.new(4, 7, 0.6),
-		Position = Vector3.new(20, 3.5, 70.2),
+	nameTag(suitStation, "🧑‍🚀 SUIT-UP ROOM", 3)
+	local suitConsole = part(model, {
+		Name = "SuitConsole",
+		Size = Vector3.new(4, 3, 1.5),
+		Position = suitCenter + Vector3.new(0, -4, -4),
 		Color = Color3.fromRGB(40, 60, 90),
-		Material = Enum.Material.Glass,
+		Material = Enum.Material.Metal,
 	})
-	nameTag(suitStation, "🧑‍🚀 SUIT UP", 8)
-
 	local suitPrompt = Instance.new("ProximityPrompt")
 	suitPrompt.Name = "SuitPrompt"
 	suitPrompt.ActionText = "Put on Space Suit"
@@ -883,16 +889,15 @@ function WorldBuilder.build(): Complex
 	suitPrompt.HoldDuration = 1
 	suitPrompt.RequiresLineOfSight = false
 	suitPrompt.MaxActivationDistance = Config.Suit.PromptDistance
-	suitPrompt.Parent = suitDoor
+	suitPrompt.Parent = suitConsole
 
-	local vab = part(model, {
-		Name = "VehicleAssemblyBuilding",
-		Size = Vector3.new(34, 56, 34),
-		Position = Vector3.new(0, 28, 40),
-		Color = WHITE,
-		Material = Enum.Material.Concrete,
-	})
-	nameTag(vab, "VEHICLE ASSEMBLY", 30)
+	-- Vehicle Assembly Building (enterable). Big high-bay door faces the pad (-Z).
+	local vabCenter = Vector3.new(0, 28, 40)
+	buildHall(model, "VAB", vabCenter, Vector3.new(34, 56, 34), WHITE, Enum.Material.Concrete, 16, 34, -1)
+	local vabCore = part(model, { Name = "VehicleAssemblyBuilding", Size = Vector3.new(1, 1, 1), Position = vabCenter + Vector3.new(0, 30, 0), Transparency = 1, CanCollide = false })
+	nameTag(vabCore, "VEHICLE ASSEMBLY", 4)
+	-- Ground console by the VAB's pad-facing door for the rollout prompt.
+	local vab = part(model, { Name = "VABConsole", Size = Vector3.new(4, 3, 1.5), Position = Vector3.new(0, 1.5, 21), Color = DARK, Material = Enum.Material.Metal })
 	-- Tall vertical "high-bay door" stripes + a top band so it reads like a real VAB.
 	for i = -1, 2 do
 		part(model, {
@@ -911,14 +916,11 @@ function WorldBuilder.build(): Complex
 		Material = Enum.Material.Metal,
 	})
 
-	local mc = part(model, {
-		Name = "MissionControl",
-		Size = Vector3.new(30, 14, 22),
-		Position = Vector3.new(-56, 7, 20),
-		Color = Color3.fromRGB(208, 210, 216),
-		Material = Enum.Material.Concrete,
-	})
-	nameTag(mc, "MISSION CONTROL", 9)
+	-- Mission Control (enterable). Walk in the north door; screens are on the east wall.
+	local mcCenter = Vector3.new(-56, 7, 20)
+	buildHall(model, "MC", mcCenter, Vector3.new(30, 14, 22), Color3.fromRGB(208, 210, 216), Enum.Material.Concrete, 6, 9, 1)
+	local mc = part(model, { Name = "MissionControl", Size = Vector3.new(1, 1, 1), Position = mcCenter + Vector3.new(0, 8, 0), Transparency = 1, CanCollide = false })
+	nameTag(mc, "MISSION CONTROL", 2)
 
 	part(model, {
 		Name = "Crawlerway",
@@ -956,10 +958,22 @@ function WorldBuilder.build(): Complex
 		part(model, { Name = "TowerBeam", Size = Vector3.new(0.5, 0.5, 7), Position = Vector3.new(towerX + 3, y, towerZ), Color = DARK, Material = Enum.Material.Metal })
 	end
 
-	-- Crew access arm (walkway) reaching from the tower to the rocket at capsule height.
-	part(model, { Name = "CrewArm", Size = Vector3.new(11, 0.6, 3), Position = Vector3.new(-6.5, 38, -72), Color = Color3.fromRGB(150, 152, 160), Material = Enum.Material.Metal })
-	part(model, { Name = "ArmRail", Size = Vector3.new(11, 1.4, 0.3), Position = Vector3.new(-6.5, 39, -73.4), Color = ACCENT, Material = Enum.Material.Metal })
-	part(model, { Name = "ArmRail", Size = Vector3.new(11, 1.4, 0.3), Position = Vector3.new(-6.5, 39, -70.6), Color = ACCENT, Material = Enum.Material.Metal })
+	-- Crew access arm (walkway) from the tower to the capsule hatch, at capsule height.
+	part(model, { Name = "CrewArm", Size = Vector3.new(11, 0.6, 3), Position = Vector3.new(-6.5, 44, towerZ), Color = Color3.fromRGB(150, 152, 160), Material = Enum.Material.Metal })
+	part(model, { Name = "ArmRail", Size = Vector3.new(11, 1.4, 0.3), Position = Vector3.new(-6.5, 45, towerZ - 1.4), Color = ACCENT, Material = Enum.Material.Metal })
+	part(model, { Name = "ArmRail", Size = Vector3.new(11, 1.4, 0.3), Position = Vector3.new(-6.5, 45, towerZ + 1.4), Color = ACCENT, Material = Enum.Material.Metal })
+
+	-- Crew elevator at the tower base — ride it up to the access arm.
+	local elevatorCar = part(model, { Name = "ElevatorCar", Size = Vector3.new(4, 5, 4), Position = Vector3.new(towerX, 3, towerZ), Color = Color3.fromRGB(90, 94, 104), Material = Enum.Material.Metal, Transparency = 0.15 })
+	local elevatorPrompt = Instance.new("ProximityPrompt")
+	elevatorPrompt.Name = "ElevatorPrompt"
+	elevatorPrompt.ActionText = "Take Crew Elevator"
+	elevatorPrompt.ObjectText = "Service Tower"
+	elevatorPrompt.HoldDuration = 0.5
+	elevatorPrompt.RequiresLineOfSight = false
+	elevatorPrompt.MaxActivationDistance = 12
+	elevatorPrompt.Parent = elevatorCar
+	local crewArmTop = CFrame.lookAt(Vector3.new(towerX + 3, 45.5, towerZ), Vector3.new(0, 45.5, towerZ))
 
 	-- Lightning masts around the pad.
 	for _, m in { Vector3.new(-22, 0, -94), Vector3.new(22, 0, -94), Vector3.new(0, 0, -50) } do
@@ -1232,6 +1246,8 @@ function WorldBuilder.build(): Complex
 		PayloadPrompt = payloadPrompt,
 		BuildLabel = buildLabel,
 		TelemetryLabel = telemetryLabel,
+		ElevatorPrompt = elevatorPrompt,
+		CrewArmTop = crewArmTop,
 	}
 end
 
