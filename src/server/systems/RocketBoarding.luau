@@ -85,6 +85,20 @@ function RocketBoarding.start(complex: any, launchSystem: any)
 		notify:FireClient(player, "🛗 Up top! Cross the access arm and enter the capsule.")
 	end)
 
+	-- Control-tower elevator: ride up to the windowed control room (anyone can watch from there).
+	complex.ControlElevatorPrompt.Triggered:Connect(function(player: Player)
+		local character = player.Character
+		local hrp = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if not hrp then
+			return
+		end
+		screen:FireClient(player, "out", 0.4)
+		task.wait(0.5)
+		hrp.CFrame = complex.ControlRoomTop
+		screen:FireClient(player, "in", 0.4)
+		notify:FireClient(player, "🛰️ Welcome to Launch Control — watch the launch through the windows.")
+	end)
+
 	-- Capsule hatch: enter + launch.
 	complex.BoardPrompt.Triggered:Connect(function(player: Player)
 		local character = player.Character
